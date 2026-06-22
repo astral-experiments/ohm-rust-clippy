@@ -68,9 +68,7 @@ impl DurationSuboptimalUnits {
 
 impl LateLintPass<'_> for DurationSuboptimalUnits {
     fn check_expr(&mut self, cx: &LateContext<'_>, expr: &'_ Expr<'_>) {
-        if !expr.span.in_external_macro(cx.sess().source_map())
-            // Check if a function on std::time::Duration is called
-            && let ExprKind::Call(func, [arg]) = expr.kind
+        if let ExprKind::Call(func, [arg]) = expr.kind
             && let ExprKind::Path(QPath::TypeRelative(func_ty, func_name)) = func.kind
             && cx
                 .typeck_results()
@@ -87,6 +85,7 @@ impl LateLintPass<'_> for DurationSuboptimalUnits {
             // There is no need to promote e.g. 0 seconds to 0 hours
             && value != 0
             && let Some((promoted_constructor, promoted_value)) = self.promote(cx, func_name.ident.name, value)
+            && !expr.span.in_external_macro(cx.sess().source_map())
         {
             span_lint_and_then(
                 cx,
