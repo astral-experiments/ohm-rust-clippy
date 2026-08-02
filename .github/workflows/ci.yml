@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [ohm-1.97.1]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  RUST_BACKTRACE: 1
+  CARGO_INCREMENTAL: 0
+  RUSTFLAGS: -D warnings
+
+jobs:
+  lint:
+    name: Formatting and lint registration
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - name: Cache Cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check lint registration
+        run: cargo dev update_lints --check
+
+      - name: Check formatting
+        run: cargo dev fmt --check
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
+      NO_FMT_TEST: 1
+      # This source snapshot uses compiler APIs from Rust 1.97.1, not the older
+      # nightly in rust-toolchain.toml that remains necessary for formatting.
+      RUSTC_BOOTSTRAP: 1
+      RUSTUP_TOOLCHAIN: 1.97.1
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Install the matching compiler
+        run: rustup toolchain install 1.97.1 --profile minimal --component rustc-dev --component llvm-tools --component rust-src
+
+      - name: Cache Cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build tests and internal lints
+        run: cargo build --tests --features internal
+
+      - name: Test UI, configuration, and internal lints
+        run: cargo test --features internal
+
+      - name: Test lint implementations
+        run: cargo test
+        working-directory: clippy_lints
+
+      - name: Test lint utilities
+        run: cargo test
+        working-directory: clippy_utils
+
+      - name: Test lint configuration
+        run: cargo test
+        working-directory: clippy_config
+
+      - name: Test compiler tooling utilities
+        run: cargo test
+        working-directory: rustc_tools_util
+
+      - name: Test developer tooling
+        run: cargo test
+        working-directory: clippy_dev
+
+      - name: Test the Clippy driver
+        run: .github/driver.sh
+        env:
+          OS: ${{ runner.os }}
