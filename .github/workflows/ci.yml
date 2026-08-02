@@ -20,15 +20,17 @@ env:
 jobs:
   lint:
     name: Formatting and lint registration
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04-4
+    env:
+      RUSTUP_TOOLCHAIN: nightly-2026-05-13
     steps:
       - name: Check out the repository
         uses: actions/checkout@v6
         with:
           persist-credentials: false
 
-      - name: Install the pinned toolchain
-        run: rustup show active-toolchain || rustup toolchain install
+      - name: Install the nightly formatter
+        run: rustup toolchain install nightly-2026-05-13 --profile minimal --component rustfmt
 
       - name: Cache Cargo artifacts
         uses: Swatinem/rust-cache@v2
@@ -41,14 +43,11 @@ jobs:
 
   test:
     name: Tests
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04-16
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
       NO_FMT_TEST: 1
-      # This source snapshot uses compiler APIs from Rust 1.97.1, not the older
-      # nightly in rust-toolchain.toml that remains necessary for formatting.
       RUSTC_BOOTSTRAP: 1
-      RUSTUP_TOOLCHAIN: 1.97.1
     steps:
       - name: Check out the repository
         uses: actions/checkout@v6
