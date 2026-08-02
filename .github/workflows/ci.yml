@@ -30,7 +30,7 @@ jobs:
           persist-credentials: false
 
       - name: Install the nightly formatter
-        run: rustup toolchain install nightly-2026-05-13 --profile minimal --component rustfmt --component rustc-dev
+        run: rustup toolchain install nightly-2026-05-13 --profile minimal --component rustfmt --component rustc-dev --component llvm-tools
 
       - name: Cache Cargo artifacts
         uses: Swatinem/rust-cache@v2
