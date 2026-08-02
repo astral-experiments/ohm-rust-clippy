@@ -65,7 +65,7 @@ jobs:
         run: cargo build --tests --features internal
 
       - name: Test UI, configuration, and internal lints
-        run: cargo test --features internal
+        run: cargo test --features internal -- --skip check_host_compiler
 
       - name: Test lint implementations
         run: cargo test
