@@ -1,7 +1,7 @@
 //! A statically-combined late lint pass.
 //!
-//! Folds clippy's ~300 late passes into one concrete struct, one field per pass.
-//! The single `LateLintPass` impl forwards each `check_*` to every field; with
+//! Folds each group of Clippy's late passes into one concrete struct, one field
+//! per pass. The single `LateLintPass` impl forwards each `check_*` to every field; with
 //! concrete types and `#[inline(always)]`, unoverridden methods are DCE'd and the
 //! rest become direct calls, so there is no vtable or per-node dynamic dispatch.
 //!
@@ -76,12 +76,14 @@ macro_rules! combined_late_lint_pass {
         #[allow(non_snake_case)]
         pub struct $name<'tcx> {
             $($field: $crate::combined_late_pass::Gated<$fty>,)*
+            _marker: std::marker::PhantomData<&'tcx ()>,
         }
 
         impl<'tcx> $name<'tcx> {
             pub fn new<F: Fn(&rustc_lint::LintVec) -> bool>($($pname: $pty,)* is_active: &F) -> Self {
                 Self {
                     $($field: $crate::combined_late_pass::Gated::new(is_active, $ctor),)*
+                    _marker: std::marker::PhantomData,
                 }
             }
         }
