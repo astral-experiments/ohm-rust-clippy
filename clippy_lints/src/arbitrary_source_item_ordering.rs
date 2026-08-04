@@ -13,8 +13,8 @@ use rustc_hir::{
 };
 use rustc_lint::{LateContext, LateLintPass, LintContext, impl_lint_pass};
 use rustc_middle::ty::{AssocKind, TyCtxt};
-use rustc_span::{Ident, Symbol, bug};
 use rustc_span::def_id::LocalModId;
+use rustc_span::{Ident, Symbol, bug};
 
 declare_clippy_lint! {
     /// ### What it does

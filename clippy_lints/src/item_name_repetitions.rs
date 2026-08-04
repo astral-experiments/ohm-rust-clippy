@@ -5,7 +5,7 @@ use clippy_utils::{is_bool, is_from_proc_macro};
 use rustc_data_structures::fx::FxHashSet;
 use rustc_hir::{Body, EnumDef, FieldDef, Item, ItemKind, QPath, TyKind, UseKind, UseTree, Variant, VariantData};
 use rustc_lint::{LateContext, LateLintPass, impl_lint_pass};
-use rustc_span::symbol::Symbol;
+use rustc_span::symbol::{Ident, Symbol};
 
 declare_clippy_lint! {
     /// ### What it does
@@ -208,6 +208,51 @@ fn have_no_extra_prefix(prefixes: &[&str]) -> bool {
 }
 
 impl ItemNameRepetitions {
+    fn check_containing_module_name(&self, cx: &LateContext<'_>, item: &Item<'_>, ident: Ident, item_camel: &str) {
+        if let [.., prev] = &*self.modules
+            && prev.is_public
+            && prev.in_body_count == 0
+            && !item.span.from_expansion()
+            && !matches!(item.kind, ItemKind::Macro(..))
+            && cx.tcx.visibility(item.owner_id).is_public()
+        {
+            if !self.allow_exact_repetitions && item_camel == prev.name_camel {
+                if !is_from_proc_macro(cx, item) {
+                    span_lint(
+                        cx,
+                        MODULE_NAME_REPETITIONS,
+                        ident.span,
+                        "item name is the same as its containing module's name",
+                    );
+                }
+            } else if item_camel.len() > prev.name_camel.len() {
+                if let Some(s) = item_camel.strip_prefix(&prev.name_camel)
+                    && let Some(c) = s.chars().next()
+                    && (c == '_' || c.is_uppercase() || c.is_numeric())
+                {
+                    if !is_from_proc_macro(cx, item) {
+                        span_lint(
+                            cx,
+                            MODULE_NAME_REPETITIONS,
+                            ident.span,
+                            "item name starts with its containing module's name",
+                        );
+                    }
+                } else if let Some(s) = item_camel.strip_suffix(&prev.name_camel)
+                    && !self.is_allowed_prefix(s)
+                    && !is_from_proc_macro(cx, item)
+                {
+                    span_lint(
+                        cx,
+                        MODULE_NAME_REPETITIONS,
+                        ident.span,
+                        "item name ends with its containing module's name",
+                    );
+                }
+            }
+        }
+    }
+
     /// Lint the names of enum variants against the name of the enum.
     fn check_variants(&self, cx: &LateContext<'_>, item: &Item<'_>, def: &EnumDef<'_>) {
         if self.avoid_breaking_exported_api && cx.effective_visibilities.is_exported(item.owner_id.def_id) {
@@ -546,48 +591,7 @@ impl LateLintPass<'_> for ItemNameRepetitions {
         let item_name = ident.name.as_str();
         let item_camel = to_camel_case(item_name);
 
-        if let [.., prev] = &*self.modules
-            && prev.is_public
-            && prev.in_body_count == 0
-            && !item.span.from_expansion()
-            && !matches!(item.kind, ItemKind::Macro(..))
-            && cx.tcx.visibility(item.owner_id).is_public()
-        {
-            if !self.allow_exact_repetitions && item_camel == prev.name_camel {
-                if !is_from_proc_macro(cx, item) {
-                    span_lint(
-                        cx,
-                        MODULE_NAME_REPETITIONS,
-                        ident.span,
-                        "item name is the same as its containing module's name",
-                    );
-                }
-            } else if item_camel.len() > prev.name_camel.len() {
-                if let Some(s) = item_camel.strip_prefix(&prev.name_camel)
-                    && let Some(c) = s.chars().next()
-                    && (c == '_' || c.is_uppercase() || c.is_numeric())
-                {
-                    if !is_from_proc_macro(cx, item) {
-                        span_lint(
-                            cx,
-                            MODULE_NAME_REPETITIONS,
-                            ident.span,
-                            "item name starts with its containing module's name",
-                        );
-                    }
-                } else if let Some(s) = item_camel.strip_suffix(&prev.name_camel)
-                    && !self.is_allowed_prefix(s)
-                    && !is_from_proc_macro(cx, item)
-                {
-                    span_lint(
-                        cx,
-                        MODULE_NAME_REPETITIONS,
-                        ident.span,
-                        "item name ends with its containing module's name",
-                    );
-                }
-            }
-        }
+        self.check_containing_module_name(cx, item, ident, &item_camel);
 
         if matches!(item.kind, ItemKind::Mod(..)) {
             self.modules.push(ModInfo {
