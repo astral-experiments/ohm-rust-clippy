@@ -143,3 +143,60 @@ fn test_no_deps_ignores_path_deps_in_workspaces() {
     // Make sure Cargo is aware of the new `--cfg` flag.
     lint_path_dep();
 }
+
+#[test]
+fn test_fix_dependency_mode_matches_clippy() {
+    if IS_RUSTC_TEST_SUITE {
+        return;
+    }
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let target_dir = root.join("target").join("workspace_fix_test");
+    let cwd = root.join("tests/workspace_test");
+
+    Command::new("cargo")
+        .current_dir(&cwd)
+        .env("CARGO_TARGET_DIR", &target_dir)
+        .arg("clean")
+        .args(["-p", "subcrate"])
+        .args(["-p", "path_dep"])
+        .output()
+        .unwrap();
+
+    let run_fix = |no_deps| {
+        let mut command = Command::new(&*CARGO_CLIPPY_PATH);
+        command
+            .current_dir(&cwd)
+            .env("CARGO_INCREMENTAL", "0")
+            .env("CARGO_TARGET_DIR", &target_dir)
+            .arg("clippy")
+            .args(["-p", "subcrate"])
+            .arg("--fix")
+            .arg("--allow-dirty");
+        if no_deps {
+            command.arg("--no-deps");
+        }
+        command
+            .arg("--")
+            .arg("-Cdebuginfo=0")
+            .args(["--cfg", r#"feature="primary_package_test""#])
+            .output()
+            .unwrap()
+    };
+
+    let output = run_fix(false);
+    println!("status: {}", output.status);
+    println!("stdout: {}", String::from_utf8_lossy(&output.stdout));
+    println!("stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("error: empty `loop {}` wastes CPU cycles")
+    );
+
+    let output = run_fix(true);
+    println!("status: {}", output.status);
+    println!("stdout: {}", String::from_utf8_lossy(&output.stdout));
+    println!("stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(output.status.success());
+}
