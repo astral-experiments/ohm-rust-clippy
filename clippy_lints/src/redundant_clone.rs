@@ -83,7 +83,7 @@ impl<'tcx> LateLintPass<'tcx> for RedundantClone {
 
         let mir = cx.tcx.optimized_mir(def_id.to_def_id());
 
-        let mut possible_borrower = PossibleBorrowerMap::new(cx, mir);
+        let mut possible_borrower = None;
 
         for (bb, bbdata) in mir.basic_blocks.iter_enumerated() {
             let terminator = bbdata.terminator();
@@ -131,7 +131,11 @@ impl<'tcx> LateLintPass<'tcx> for RedundantClone {
                 // `res = clone(arg)` can be turned into `res = move arg;`
                 // if `arg` is the only borrow of `cloned` at this point.
 
-                if cannot_move_out || !possible_borrower.only_borrowers(&[arg], cloned, loc) {
+                if cannot_move_out
+                    || !possible_borrower
+                        .get_or_insert_with(|| PossibleBorrowerMap::new(cx, mir))
+                        .only_borrowers(&[arg], cloned, loc)
+                {
                     continue;
                 }
 
@@ -177,13 +181,18 @@ impl<'tcx> LateLintPass<'tcx> for RedundantClone {
                 // StorageDead(pred_arg);
                 // res = to_path_buf(cloned);
                 // ```
-                if cannot_move_out || !possible_borrower.only_borrowers(&[arg, cloned], local, loc) {
+                if cannot_move_out
+                    || !possible_borrower
+                        .get_or_insert_with(|| PossibleBorrowerMap::new(cx, mir))
+                        .only_borrowers(&[arg, cloned], local, loc)
+                {
                     continue;
                 }
 
                 (local, deref_clone_ret)
             };
 
+            let possible_borrower = possible_borrower.get_or_insert_with(|| PossibleBorrowerMap::new(cx, mir));
             let clone_usage = if local == ret_local {
                 CloneUsage {
                     cloned_use_loc: None.into(),
@@ -254,7 +263,8 @@ impl<'tcx> LateLintPass<'tcx> for RedundantClone {
 
 fn contains_clone_like_call(body: &Body<'_>) -> bool {
     for_each_expr_without_closures(body, |expr| {
-        if let ExprKind::MethodCall(method, ..) = expr.kind
+        if let ExprKind::MethodCall(method, receiver, ..) = expr.kind
+            && !matches!(receiver.kind, ExprKind::Lit(_))
             && matches!(
                 method.ident.name,
                 sym::clone | sym::to_owned | sym::to_string | sym::to_path_buf | sym::to_os_string
