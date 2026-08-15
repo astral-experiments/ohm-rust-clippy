@@ -42,8 +42,16 @@ jobs:
         run: cargo dev fmt --check
 
   test:
-    name: Tests
-    runs-on: depot-ubuntu-24.04-16
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Tests
+            runner: depot-ubuntu-24.04-16
+          - name: Tests (macOS)
+            runner: namespace-profile-macos-15
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
       NO_FMT_TEST: 1
