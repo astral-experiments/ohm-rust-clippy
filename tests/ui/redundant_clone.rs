@@ -291,3 +291,35 @@ mod issue13900 {
         }
     }
 }
+
+mod hir_prefilter {
+    fn nested_closure() {
+        let _ = || {
+            let value = String::from("closure");
+            let _: String = value.clone();
+            //~^ redundant_clone
+        };
+    }
+
+    macro_rules! identity {
+        ($expression:expr) => {
+            $expression
+        };
+    }
+
+    fn macro_expression() {
+        let value = String::from("macro");
+        let _ = identity!(value.clone());
+        //~^ redundant_clone
+    }
+
+    fn literal_receivers() {
+        let _ = "literal".to_owned();
+        let _ = "literal".to_string();
+        let _ = b"bytes".to_owned();
+        let _ = c"ffi".to_owned();
+        let _ = 42_u8.to_string();
+        let _ = identity!("macro literal").to_owned();
+        let _ = || "closure literal".to_string();
+    }
+}
