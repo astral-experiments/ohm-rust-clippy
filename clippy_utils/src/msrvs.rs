@@ -257,6 +257,9 @@ impl MsrvStack {
 }
 
 fn parse_attrs(attrs: &[impl AttributeExt]) -> Option<RustcVersion> {
+    if attrs.is_empty() {
+        return None;
+    }
     let msrv_attr = attrs.iter().find(|attr| attr.path_matches(&[sym::clippy, sym::msrv]))?;
 
     let msrv = msrv_attr.value_str()?;
@@ -265,6 +268,10 @@ fn parse_attrs(attrs: &[impl AttributeExt]) -> Option<RustcVersion> {
 }
 
 pub fn check_attrs(sess: &Session, attrs: &[impl AttributeExt]) {
+    if attrs.is_empty() {
+        return;
+    }
+
     let mut msrv_attrs = attrs.iter().filter(|attr| attr.path_matches(&[sym::clippy, sym::msrv]));
 
     let Some(msrv_attr) = msrv_attrs.next() else {
