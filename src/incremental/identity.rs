@@ -54,6 +54,8 @@ pub(super) fn executable() -> io::Result<File> {
         return Err(io::Error::other("dyld did not identify the main executable"));
     }
     let mut info = MaybeUninit::<RegionWithPath>::uninit();
+    let info_size = libc::c_int::try_from(size_of::<RegionWithPath>())
+        .map_err(|_| io::Error::other("process region information is too large"))?;
     // SAFETY: the buffer has the public ABI's size and alignment and remains live for the
     // call. Query our own mapped executable, not a pathname that could identify a replacement.
     let written = unsafe {
@@ -62,16 +64,19 @@ pub(super) fn executable() -> io::Result<File> {
             PROC_PIDREGIONPATHINFO,
             header as u64,
             info.as_mut_ptr().cast(),
-            size_of::<RegionWithPath>() as libc::c_int,
+            info_size,
         )
     };
-    if written != size_of::<RegionWithPath>() as libc::c_int {
+    if written != info_size {
         return Err(io::Error::other("could not identify the mapped Clippy executable"));
     }
     // SAFETY: a successful full-size result initialized every field of the C structure.
     let info = unsafe { info.assume_init() };
     let metadata = file.metadata()?;
-    if metadata.dev() as u32 != info.vnode.vip_vi.vi_stat.vst_dev || metadata.ino() != info.vnode.vip_vi.vi_stat.vst_ino
+    // stat exposes a signed dev_t while libproc exposes its unsigned 32-bit bits.
+    let file_device = metadata.dev() & u64::from(u32::MAX);
+    if file_device != u64::from(info.vnode.vip_vi.vi_stat.vst_dev)
+        || metadata.ino() != info.vnode.vip_vi.vi_stat.vst_ino
     {
         return Err(io::Error::other("Clippy's executable path was replaced after startup"));
     }
