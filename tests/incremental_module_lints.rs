@@ -14,6 +14,7 @@ struct Fixture {
     threads: usize,
     docs_links: bool,
     msrv: Option<&'static str>,
+    command_line_lint: bool,
 }
 
 impl Fixture {
@@ -23,6 +24,7 @@ impl Fixture {
             threads,
             docs_links: true,
             msrv: None,
+            command_line_lint: true,
         };
         fixture.write("lib.rs", "pub mod value;\npub mod first;\npub mod second;\n");
         fixture.write("value.rs", "pub struct Value;\n");
@@ -62,7 +64,6 @@ impl Fixture {
                 "-Aclippy::all",
                 "-Aclippy::pedantic",
                 "-Aunused",
-                "-Wclippy::zero_sized_map_values",
                 "-Wunfulfilled_lint_expectations",
                 "-Zincremental-verify-ich=yes",
                 "-Cmetadata=fixture",
@@ -75,6 +76,9 @@ impl Fixture {
             .env_remove("CLIPPY_ARGS")
             .env_remove("CLIPPY_DISABLE_DOCS_LINKS")
             .env_remove("CARGO_PKG_RUST_VERSION");
+        if self.command_line_lint {
+            command.arg("-Wclippy::zero_sized_map_values");
+        }
         if let Some(sysroot) = option_env!("TEST_SYSROOT") {
             command.arg("--sysroot").arg(sysroot);
         }
@@ -238,5 +242,24 @@ fn existing_ui_cases_replay_in_an_unchanged_module() {
         fixture.check(14, 0, Some("loaded"));
         fixture.replace("examples.rs", "const CONST_OK", "// move spans\nconst CONST_OK");
         fixture.check(14, 0, Some("loaded"));
+    }
+}
+
+#[test]
+fn attribute_only_activation_retains_the_whole_crate_pass() {
+    for threads in [1, 4] {
+        let mut fixture = Fixture::new(threads);
+        fixture.command_line_lint = false;
+        fixture.replace(
+            "lib.rs",
+            "pub mod value;",
+            "#![warn(clippy::zero_sized_map_values)]\npub mod value;",
+        );
+        fixture.check(4, 0, Some("not-loaded"));
+        fixture.write("clippy.toml", "avoid-breaking-exported-api = true\n");
+        // This mode does not cache Clippy queries or add a driver compatibility key.
+        fixture.check(4, 0, Some("loaded"));
+        fixture.write("value.rs", "pub struct Value(pub u8);\n");
+        fixture.check(0, 0, Some("loaded"));
     }
 }
