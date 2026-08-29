@@ -443,7 +443,7 @@ pub fn explain(name: &str) -> i32 {
 /// Register all lints and lint groups with the rustc lint store
 ///
 /// Used in `./src/driver.rs`.
-pub fn register_lint_passes(store: &mut rustc_lint::LintStore, conf: &'static Conf) {
+pub fn register_lint_passes(store: &mut rustc_lint::LintStore, conf: &'static Conf, incremental: bool) {
     for (old_name, new_name) in deprecated_lints::RENAMED {
         store.register_renamed(old_name, new_name);
     }
@@ -467,9 +467,21 @@ pub fn register_lint_passes(store: &mut rustc_lint::LintStore, conf: &'static Co
         }));
     }
 
+    if incremental {
+        // This stateless pass only reads HIR, type and layout queries. Keep passes that read
+        // source snippets or retain whole-crate state in the combined traversal.
+        store.register_late_lint_mod_pass(Box::new(|_| Box::new(zero_sized_map_values::ZeroSizedMapValues)));
+    }
+
     store.register_late_lint_pass(Box::new(move |tcx: TyCtxt<'_>| {
         let skippable_lints = tcx.skippable_lints(());
-        let is_active = |lints: &rustc_lint::LintVec| is_lint_pass_required(skippable_lints, lints);
+        let is_active = |lints: &rustc_lint::LintVec| {
+            is_lint_pass_required(skippable_lints, lints)
+                && !(incremental
+                    && lints
+                        .iter()
+                        .any(|lint| std::ptr::eq(*lint, zero_sized_map_values::ZERO_SIZED_MAP_VALUES)))
+        };
         Box::new(CombinedLateLintPass::new(
             tcx,
             conf,
