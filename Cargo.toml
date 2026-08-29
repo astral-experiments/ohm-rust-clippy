@@ -32,6 +32,9 @@ termize = "0.2"
 color-print = "0.3.4"
 anstream = "0.6.18"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 tempfile = "3.20"
 cargo_metadata = "0.23"

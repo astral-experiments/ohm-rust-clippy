@@ -6,8 +6,6 @@
 
 // FIXME: switch to something more ergonomic here, once available.
 // (Currently there is no way to opt into sysroot crates without `extern crate`.)
-#[cfg(all(target_os = "macos", any(test, ohm_incremental_driver_hash)))]
-extern crate libc;
 #[cfg(any(
     ohm_incremental_driver_hash,
     all(test, any(target_os = "linux", target_os = "macos"))
@@ -167,7 +165,7 @@ impl rustc_driver::Callbacks for ClippyCallbacks {
             track_files(sess);
 
             sess.env_depinfo.borrow_mut().insert((
-                Symbol::intern("CLIPPY_DISABLE_DOCS_LINKS"),
+                sym::CLIPPY_DISABLE_DOCS_LINKS,
                 env::var("CLIPPY_DISABLE_DOCS_LINKS")
                     .ok()
                     .map(|value| Symbol::intern(&value)),

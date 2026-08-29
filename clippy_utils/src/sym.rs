@@ -46,6 +46,7 @@ generate! {
     BinaryHeap,
     CLIPPY_ARGS,
     CLIPPY_CONF_DIR,
+    CLIPPY_DISABLE_DOCS_LINKS,
     CRLF: "\r\n",
     Cargo_toml: "Cargo.toml",
     Child,
