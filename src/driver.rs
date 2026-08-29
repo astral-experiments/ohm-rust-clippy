@@ -7,6 +7,13 @@
 
 // FIXME: switch to something more ergonomic here, once available.
 // (Currently there is no way to opt into sysroot crates without `extern crate`.)
+#[cfg(all(target_os = "macos", any(test, ohm_incremental_driver_hash)))]
+extern crate libc;
+#[cfg(any(
+    ohm_incremental_driver_hash,
+    all(test, any(target_os = "linux", target_os = "macos"))
+))]
+extern crate rustc_data_structures;
 extern crate rustc_driver;
 extern crate rustc_interface;
 extern crate rustc_session;
@@ -27,6 +34,12 @@ use std::fs::read_to_string;
 use std::io::Write as _;
 use std::path::Path;
 use std::process::ExitCode;
+
+#[cfg(any(
+    ohm_incremental_driver_hash,
+    all(test, any(target_os = "linux", target_os = "macos"))
+))]
+mod incremental;
 
 /// If a command-line option matches `find_arg`, then apply the predicate `pred` on its value. If
 /// true, then return it. The parameter is assumed to be either `--arg=value` or `--arg value`.
@@ -102,10 +115,9 @@ fn track_files(sess: &Session) {
 
     // `clippy.toml` will be automatically tracked as it's loaded with `sess.source_map().load_file()`
 
-    // During development track the `clippy-driver` executable so that cargo will re-run clippy whenever
-    // it is rebuilt
-    if cfg!(debug_assertions)
-        && let Ok(current_exe) = env::current_exe()
+    // A changed driver must rerun Clippy even when source and the reported version are unchanged.
+    // This is required for incremental lint queries in release builds as well as development.
+    if let Ok(current_exe) = env::current_exe()
         && let Some(current_exe) = current_exe.to_str()
     {
         file_depinfo.insert(Symbol::intern(current_exe));
@@ -140,9 +152,22 @@ impl rustc_driver::Callbacks for ClippyCallbacks {
     fn config(&mut self, config: &mut interface::Config) {
         let previous = config.register_lints.take();
         let clippy_args_var = self.clippy_args_var.take();
+        #[cfg(ohm_incremental_driver_hash)]
+        let conf_snapshot = clippy_config::snapshot_conf_file();
+        #[cfg(ohm_incremental_driver_hash)]
+        let incremental_lints = incremental::configure(config, &conf_snapshot, clippy_args_var.as_deref());
+        #[cfg(not(ohm_incremental_driver_hash))]
+        let incremental_lints = false;
         config.track_state = Some(Box::new(move |sess| {
             track_clippy_args(sess, clippy_args_var.as_deref());
             track_files(sess);
+
+            sess.env_depinfo.borrow_mut().insert((
+                Symbol::intern("CLIPPY_DISABLE_DOCS_LINKS"),
+                env::var("CLIPPY_DISABLE_DOCS_LINKS")
+                    .ok()
+                    .map(|value| Symbol::intern(&value)),
+            ));
 
             // Trigger a rebuild if CLIPPY_CONF_DIR changes. The value must be a valid string so
             // changes between dirs that are invalid UTF-8 will not trigger rebuilds
@@ -162,8 +187,15 @@ impl rustc_driver::Callbacks for ClippyCallbacks {
             list_builder.insert(clippy_lints::declared_lints::LINTS);
             list_builder.register(lint_store);
 
+            #[cfg(ohm_incremental_driver_hash)]
+            let conf = if incremental_lints {
+                clippy_config::Conf::load_snapshot(sess, &conf_snapshot)
+            } else {
+                clippy_config::Conf::load(sess)
+            };
+            #[cfg(not(ohm_incremental_driver_hash))]
             let conf = clippy_config::Conf::load(sess);
-            clippy_lints::register_lint_passes(lint_store, conf);
+            clippy_lints::register_lint_passes(lint_store, conf, incremental_lints);
 
             #[cfg(feature = "internal")]
             clippy_lints_internal::register_lints(lint_store);
