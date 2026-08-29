@@ -38,6 +38,7 @@ mod configuration {
     use std::sync::Arc;
 
     use rustc_interface::interface::Config;
+    use rustc_session::lint::Level;
     use rustc_span::source_map::{FileLoader, RealFileLoader};
 
     use super::*;
@@ -49,6 +50,13 @@ mod configuration {
         args: Option<&str>,
     ) -> bool {
         if config.opts.incremental.is_none() || config.file_loader.is_some() {
+            return false;
+        }
+        // Avoid hashing the driver for ordinary runs that do not enable this pedantic
+        // lint. Attribute-only activation remains correct through the whole-crate pass.
+        if !config.opts.lint_opts.iter().any(|(name, level)| {
+            matches!(name.as_str(), "clippy::pedantic" | "clippy::zero_sized_map_values") && *level != Level::Allow
+        }) {
             return false;
         }
         let Ok((path, warnings)) = lookup else { return false };
