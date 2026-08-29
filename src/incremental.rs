@@ -16,7 +16,7 @@ fn driver_fingerprint() -> io::Result<Fingerprint> {
     let before = file.metadata()?;
     let mut hasher = StableHasher::new();
     before.len().hash(&mut hasher);
-    let mut buffer = [0; 64 * 1024];
+    let mut buffer = vec![0; 64 * 1024];
     loop {
         let size = file.read(&mut buffer)?;
         if size == 0 {
