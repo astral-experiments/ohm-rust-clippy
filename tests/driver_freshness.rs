@@ -73,10 +73,14 @@ fn replacing_a_same_version_driver_reruns_cargo() {
             .write_all(b"clippy-freshness-test")
             .unwrap();
     }
+    // macOS's fs::copy preserves the original driver's modification time. Model an
+    // actual newly built replacement, whose timestamp is later than the last check.
+    filetime::set_file_mtime(&replacement, filetime::FileTime::now()).unwrap();
     fs::rename(replacement, &driver).unwrap();
     let replaced_version = Command::new(&driver).arg("--version").output().unwrap();
     assert!(replaced_version.status.success());
     assert_eq!(version.stdout, replaced_version.stdout);
-    assert!(compiled_fixture(&cargo_check(root.path(), &driver)));
+    let replaced_check = cargo_check(root.path(), &driver);
+    assert!(compiled_fixture(&replaced_check), "{replaced_check}");
     assert!(!compiled_fixture(&cargo_check(root.path(), &driver)));
 }
