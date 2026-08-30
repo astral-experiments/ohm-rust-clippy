@@ -420,6 +420,8 @@ use rustc_lint::is_lint_pass_required;
 use rustc_middle::ty::TyCtxt;
 use utils::attr_collector::AttrStorage;
 
+pub mod incremental_lints;
+
 pub fn explain(name: &str) -> i32 {
     let target = format!("clippy::{}", name.to_ascii_uppercase());
     if let Some(info) = declared_lints::LINTS.iter().find(|info| info.lint.name == target) {
@@ -472,19 +474,13 @@ pub fn register_lint_passes(store: &mut rustc_lint::LintStore, conf: &'static Co
     }
 
     if incremental {
-        // This stateless pass only reads HIR, type and layout queries. Keep passes that read
-        // source snippets or retain whole-crate state in the combined traversal.
-        store.register_late_lint_mod_pass(Box::new(|_| Box::new(zero_sized_map_values::ZeroSizedMapValues)));
+        incremental_lints::register(store, conf);
     }
 
     store.register_late_lint_pass(Box::new(move |tcx: TyCtxt<'_>| {
         let skippable_lints = tcx.skippable_lints(());
         let is_active = |lints: &rustc_lint::LintVec| {
-            is_lint_pass_required(skippable_lints, lints)
-                && !(incremental
-                    && lints
-                        .iter()
-                        .any(|lint| std::ptr::eq(*lint, zero_sized_map_values::ZERO_SIZED_MAP_VALUES)))
+            is_lint_pass_required(skippable_lints, lints) && !(incremental && incremental_lints::contains_pass(lints))
         };
         Box::new(CombinedLateLintPass::new(
             tcx,
