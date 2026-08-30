@@ -542,6 +542,11 @@ fn source_sensitive_ui_cases_replay_in_an_unchanged_module() {
             include_str!("ui/needless_pass_by_value.rs"),
         ),
         ("clippy::redundant_clone", include_str!("ui/redundant_clone.rs")),
+        ("clippy::unnecessary_wraps", include_str!("ui/unnecessary_wraps.rs")),
+        (
+            "clippy::needless_borrows_for_generic_args",
+            include_str!("ui/needless_borrows_for_generic_args/needless_borrows_for_generic_args.rs"),
+        ),
     ] {
         for threads in [1, 4] {
             let mut fixture = Fixture::new(threads);
@@ -650,5 +655,141 @@ fn source_text_changes_invalidate_suggestions() {
             &[("clippy::needless_pass_by_value", 1), ("clippy::redundant_clone", 1)],
             "loaded",
         );
+    }
+}
+
+#[test]
+#[cfg(ohm_source_file_hash)]
+fn borrowed_arguments_observe_traits_and_nested_bodies() {
+    for threads in [1, 4] {
+        let mut fixture = Fixture::new(threads);
+        let lint = "clippy::needless_borrows_for_generic_args";
+        fixture.lints = vec![lint.into()];
+        fixture.whole_crate_reference = true;
+        fixture.expect_source_input = true;
+        fixture.write(
+            "lib.rs",
+            "#![warn(clippy::needless_borrows_for_generic_args)]\npub mod first; pub mod second;\n",
+        );
+        fixture.write(
+            "first.rs",
+            r#"
+use crate::second::{S, take};
+pub fn outer(value: &mut S, extra: &mut S) {
+    take(&extra);
+    fn nested(value: &mut S) { take(&value); }
+    let closure = |value: &mut S| { take(&value); };
+    take(&value);
+    closure(&mut S);
+    nested(&mut S);
+    mod inner { pub fn f(value: &mut crate::second::S) { crate::second::take(&value); } }
+}
+"#,
+        );
+        let traits = "pub struct S; pub trait Marker {} impl Marker for &&mut S {} impl Marker for &mut S {} pub fn take(_: impl Marker) {}\n";
+        fixture.write("second.rs", traits);
+        fixture.check_counts(&[(lint, 5)], "not-loaded");
+        fixture.check_counts(&[(lint, 5)], "loaded");
+        // No snippet is read once the trait change removes every diagnostic.
+        fixture.expect_source_input = false;
+        fixture.replace("second.rs", "impl Marker for &mut S {}", "");
+        fixture.check_counts(&[(lint, 0)], "loaded");
+        fixture.check_counts(&[(lint, 0)], "loaded");
+        fixture.write("second.rs", traits);
+        fixture.check_counts(&[(lint, 5)], "loaded");
+    }
+}
+
+#[test]
+#[cfg(ohm_source_file_hash)]
+fn wrapped_returns_and_macro_arguments_track_suggestion_text() {
+    for threads in [1, 4] {
+        let mut fixture = Fixture::new(threads);
+        let wraps = "clippy::unnecessary_wraps";
+        let borrows = "clippy::needless_borrows_for_generic_args";
+        fixture.lints = vec![wraps.into(), borrows.into()];
+        fixture.whole_crate_reference = true;
+        fixture.expect_source_input = true;
+        fixture.write("lib.rs", "#![warn(clippy::unnecessary_wraps, clippy::needless_borrows_for_generic_args)]\npub mod first; pub mod second;\n");
+        fixture.write(
+            "second.rs",
+            "#[macro_export] macro_rules! text { () => { \"value\" }; }\n",
+        );
+        fixture.write(
+            "first.rs",
+            r#"
+fn take(_: impl AsRef<str>) {}
+pub fn wrapped() -> Option<u8> { Some(1    + 2) }
+pub fn borrowed() { take(&crate::text!(    )); }
+"#,
+        );
+        let counts = [(wraps, 1), (borrows, 1)];
+        fixture.check_counts(&counts, "not-loaded");
+        fixture.check_counts(&counts, "loaded");
+        // Keep token positions unchanged; only the requested replacement text changes.
+        fixture.replace("first.rs", "1    + 2", "1/**/+ 2");
+        fixture.replace("first.rs", "text!(    )", "text!(/**/)");
+        let changed = fixture.compare(Some("loaded"));
+        for (lint, text) in [(wraps, "1/**/+ 2"), (borrows, "crate::text!(/**/)")] {
+            assert_eq!(count(&changed, lint), 1);
+            assert!(changed.iter().any(|diagnostic| {
+                diagnostic["code"]["code"] == lint
+                    && diagnostic["children"].as_array().unwrap().iter().any(|child| {
+                        child["spans"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .any(|span| span["suggested_replacement"] == text)
+                    })
+            }));
+        }
+        fixture.compare(Some("loaded"));
+        fixture.replace("first.rs", "1/**/+ 2", "1    + 2");
+        fixture.replace("first.rs", "text!(/**/)", "text!(    )");
+        fixture.check_counts(&counts, "loaded");
+        // Attribute-only fallback does not fingerprint configuration, so its old
+        // session can load even though the module traversal must reject its session.
+        fixture.whole_crate_reference = false;
+        fixture.write("clippy.toml", "avoid-breaking-exported-api = true\n");
+        fixture.check_counts(&[(wraps, 0), (borrows, 1)], "not-loaded");
+        fixture.check_counts(&[(wraps, 0), (borrows, 1)], "loaded");
+    }
+}
+
+#[test]
+#[cfg(ohm_source_file_hash)]
+fn borrowed_arguments_observe_inherited_msrv_and_expectations() {
+    for threads in [1, 4] {
+        let mut fixture = Fixture::new(threads);
+        let lint = "clippy::needless_borrows_for_generic_args";
+        fixture.lints = vec![lint.into()];
+        fixture.whole_crate_reference = true;
+        fixture.expect_source_input = true;
+        fixture.write(
+            "lib.rs",
+            "#![warn(clippy::needless_borrows_for_generic_args)]\n#[clippy::msrv = \"1.53\"] pub mod first;\n",
+        );
+        fixture.write(
+            "first.rs",
+            "fn take(_: impl IntoIterator) {} pub fn f() { take(&[0u8]); }\n",
+        );
+        fixture.check_counts(&[(lint, 1)], "not-loaded");
+        fixture.check_counts(&[(lint, 1)], "loaded");
+        // Disabled diagnostics do not need to read source snippets.
+        fixture.expect_source_input = false;
+        fixture.replace("lib.rs", "1.53", "1.52");
+        fixture.check_counts(&[(lint, 0)], "loaded");
+        fixture.replace("lib.rs", "1.52", "1.53");
+        fixture.check_counts(&[(lint, 1)], "loaded");
+        fixture.replace(
+            "lib.rs",
+            "pub mod first;",
+            "#[expect(clippy::needless_borrows_for_generic_args)] pub mod first;",
+        );
+        fixture.check_counts(&[(lint, 0), ("unfulfilled_lint_expectations", 0)], "loaded");
+        fixture.check_counts(&[(lint, 0), ("unfulfilled_lint_expectations", 0)], "loaded");
+        fixture.replace("first.rs", "&[0u8]", "[0u8]");
+        fixture.check_counts(&[("unfulfilled_lint_expectations", 1)], "loaded");
+        fixture.check_counts(&[("unfulfilled_lint_expectations", 1)], "loaded");
     }
 }
