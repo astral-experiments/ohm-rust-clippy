@@ -9,7 +9,7 @@ pub(super) fn executable() -> io::Result<File> {
 #[cfg(target_os = "macos")]
 pub(super) fn executable() -> io::Result<File> {
     use std::mem::{MaybeUninit, size_of};
-    use std::os::unix::fs::MetadataExt;
+    use std::os::unix::fs::MetadataExt as _;
 
     // libproc's public proc_regionwithpathinfo ABI (sys/proc_info.h). libc exposes
     // vnode_info_path and proc_pidinfo, but not the region structure or this selector.
@@ -91,7 +91,7 @@ pub(super) fn executable() -> io::Result<File> {
 pub(super) fn unchanged(before: &std::fs::Metadata, after: &std::fs::Metadata) -> bool {
     #[cfg(unix)]
     {
-        use std::os::unix::fs::MetadataExt;
+        use std::os::unix::fs::MetadataExt as _;
         before.dev() == after.dev()
             && before.ino() == after.ino()
             && before.len() == after.len()
