@@ -359,6 +359,19 @@ fn audited_lints_replay_after_edits() {
         fixture.compare(Some("loaded"));
         fixture.replace("lib.rs", "2 + 1", "2+  1");
         fixture.compare(Some("loaded"));
+        let question_mark_module = format!(
+            "case_{}.rs",
+            cases
+                .iter()
+                .position(|case| case["pass"] == "NeedlessQuestionMark")
+                .unwrap()
+        );
+        fixture.replace(&question_mark_module, "Some(x?)", "Some(x? )");
+        fixture.compare(Some("loaded"));
+        // Move whitespace within a suggested replacement without changing file length.
+        // Cached multipart edits must still remove exactly the intended tokens.
+        fixture.replace(&question_mark_module, "Some(x? )", "Some( x?)");
+        fixture.compare(Some("loaded"));
         fixture.write(
             "case_0.rs",
             "// remove this module's diagnostic\npub struct Replaced;\n",
