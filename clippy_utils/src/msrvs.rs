@@ -116,7 +116,9 @@ impl Msrv {
     /// If the crate being linted uses an `#[clippy::msrv]` attribute this will search the parent
     /// nodes for that attribute, prefer to run this check after cheaper pattern matching operations
     pub fn current(self, cx: &LateContext<'_>) -> Option<RustcVersion> {
-        if SEEN_MSRV_ATTR.load(Ordering::Relaxed) {
+        // Module queries must observe inherited attributes even when no MSRV attribute
+        // was present before: the process-wide fast path is not an incremental input.
+        if cx.only_module || SEEN_MSRV_ATTR.load(Ordering::Relaxed) {
             self.for_attrs(cx.tcx, cx.last_node_with_lint_attrs)
         } else {
             self.0
