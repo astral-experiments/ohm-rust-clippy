@@ -2,7 +2,7 @@ use clippy_config::Conf;
 use clippy_utils::diagnostics::span_lint_and_then;
 use clippy_utils::mir::{PossibleBorrowerMap, enclosing_mir, expr_local, local_assignments, used_exactly_once};
 use clippy_utils::msrvs::{self, Msrv};
-use clippy_utils::source::snippet_with_context;
+use clippy_utils::source::tracked_snippet_with_context;
 use clippy_utils::ty::{implements_trait, is_copy};
 use clippy_utils::{DefinedTy, ExprUseNode, get_expr_use_site, peel_n_hir_expr_refs, sym};
 use rustc_errors::Applicability;
@@ -128,7 +128,7 @@ impl<'tcx> LateLintPass<'tcx> for NeedlessBorrowsForGenericArgs<'tcx> {
                 |diag| {
                     let mut app = Applicability::MachineApplicable;
                     let snip_span = peel_n_hir_expr_refs(expr, count).0.span;
-                    let snip = snippet_with_context(cx, snip_span, expr.span.ctxt(), "..", &mut app).0;
+                    let snip = tracked_snippet_with_context(cx, snip_span, expr.span.ctxt(), "..", &mut app).0;
                     diag.span_suggestion(expr.span, "change this to", snip.into_owned(), app);
                 },
             );
