@@ -22,7 +22,7 @@ macro_rules! audited_passes {
             crate::combined_late_lint_pass,
             [IncrementalLateLintPass, ($conf: $conf_ty), [$($field: $ty = $ctor,)*]]
         );
-
+        #[expect(clippy::extra_unused_lifetimes, reason = "pass types use 'tcx in the body")]
         fn lint_ids<'tcx>() -> &'static FxHashSet<LintId> {
             static IDS: OnceLock<FxHashSet<LintId>> = OnceLock::new();
             IDS.get_or_init(|| {
