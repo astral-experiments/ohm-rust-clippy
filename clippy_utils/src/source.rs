@@ -597,7 +597,7 @@ pub fn snippet_with_applicability<'a, 'sm>(
     default: &'a str,
     applicability: &mut Applicability,
 ) -> Cow<'a, str> {
-    snippet_with_applicability_sm(sm.source_map(), span, default, applicability)
+    snippet_with_applicability_sm(sm.source_map(), span, default, applicability, None)
 }
 
 fn snippet_with_applicability_sm<'a>(
@@ -605,7 +605,11 @@ fn snippet_with_applicability_sm<'a>(
     span: Span,
     default: &'a str,
     applicability: &mut Applicability,
+    cx: Option<&LateContext<'_>>,
 ) -> Cow<'a, str> {
+    if let Some(cx) = cx {
+        track_span_source(cx, span);
+    }
     if *applicability != Applicability::Unspecified && span.from_expansion() {
         *applicability = Applicability::MaybeIncorrect;
     }
@@ -714,7 +718,18 @@ pub fn snippet_with_context<'a, 'sm>(
     default: &'a str,
     applicability: &mut Applicability,
 ) -> (Cow<'a, str>, bool) {
-    snippet_with_context_sm(sm.source_map(), span, outer, default, applicability)
+    snippet_with_context_sm(sm.source_map(), span, outer, default, applicability, None)
+}
+
+/// Like [`snippet_with_context`], but records the file read after walking macro contexts.
+pub fn tracked_snippet_with_context<'a>(
+    cx: &LateContext<'_>,
+    span: Span,
+    outer: SyntaxContext,
+    default: &'a str,
+    applicability: &mut Applicability,
+) -> (Cow<'a, str>, bool) {
+    snippet_with_context_sm(cx.tcx.sess.source_map(), span, outer, default, applicability, Some(cx))
 }
 
 fn snippet_with_context_sm<'a>(
@@ -723,10 +738,14 @@ fn snippet_with_context_sm<'a>(
     outer: SyntaxContext,
     default: &'a str,
     applicability: &mut Applicability,
+    cx: Option<&LateContext<'_>>,
 ) -> (Cow<'a, str>, bool) {
     // If it is just range desugaring, use the desugaring span since it may include parenthesis.
     if span.desugaring_kind() == Some(DesugaringKind::RangeExpr) && span.parent_callsite().unwrap().ctxt() == outer {
-        return (snippet_with_applicability_sm(sm, span, default, applicability), false);
+        return (
+            snippet_with_applicability_sm(sm, span, default, applicability, cx),
+            false,
+        );
     }
 
     let (span, is_macro_call) = walk_span_to_context(span, outer).map_or_else(
@@ -742,7 +761,7 @@ fn snippet_with_context_sm<'a>(
     );
 
     (
-        snippet_with_applicability_sm(sm, span, default, applicability),
+        snippet_with_applicability_sm(sm, span, default, applicability, cx),
         is_macro_call,
     )
 }

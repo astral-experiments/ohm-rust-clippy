@@ -23,10 +23,12 @@ record parent-HIR dependencies. `Msrv::current` also queries inherited attribute
 in module mode even when the process has not yet seen an MSRV attribute.
 Whole-crate passes retain those fast paths.
 
-`NeedlessPassByValue` and `RedundantClone` additionally require rustc's
-`source_file_hash` query. Their source reads use `tracked_text` and
-`tracked_snippet`, which record the contents of the files containing both ends
-of the requested span, even when extracting text fails. The query rechecks the
+`NeedlessPassByValue`, `RedundantClone`, `UnnecessaryWraps`, and
+`NeedlessBorrowsForGenericArgs` additionally require rustc's
+`source_file_hash` query. Their source reads use `tracked_text`,
+`tracked_snippet`, or `tracked_snippet_with_context`, which record the contents
+of the files containing both ends of the requested span, even when extracting
+text fails. The query rechecks the
 compiler's existing source-file hash each compilation; it does not reread or
 hash the entire source tree. Source availability is part of the result too.
 An edit to a file invalidates queries that observed it, including same-length
@@ -34,10 +36,16 @@ comment and whitespace edits that do not change HIR. Different modules in the
 same file therefore share this coarse source dependency.
 
 The driver installs the source-query hook only when its build-time compiler
-probe succeeds. Otherwise these two passes stay in the whole-crate traversal,
+probe succeeds. Otherwise these passes stay in the whole-crate traversal,
 while the original audited passes can still use module caching. Raw source
 reads through other helpers are not automatically tracked: each additional
 pass still needs a transitive audit of its source accesses.
+
+Context-aware snippets track the span after walking macro contexts, including the
+range-desugaring path. `NeedlessBorrowsForGenericArgs` keeps MIR borrower maps in
+a stack scoped to nested bodies and removes each entry in `check_body_post`;
+module queries never share this state. Its trait, MIR, and inherited MSRV inputs
+remain compiler query dependencies.
 
 The driver enables module caching only with incremental compilation, compiler
 support for the driver input fingerprint, and a verified executable/configuration

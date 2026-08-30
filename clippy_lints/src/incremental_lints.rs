@@ -23,7 +23,7 @@ macro_rules! audited_passes {
             [IncrementalLateLintPass, ($conf: $conf_ty), [$($field: $ty = $ctor,)*]]
         );
 
-        fn lint_ids() -> &'static FxHashSet<LintId> {
+        fn lint_ids<'tcx>() -> &'static FxHashSet<LintId> {
             static IDS: OnceLock<FxHashSet<LintId>> = OnceLock::new();
             IDS.get_or_init(|| {
                 let mut ids = FxHashSet::default();
@@ -36,6 +36,8 @@ macro_rules! audited_passes {
 
 #[rustfmt::skip]
 audited_passes!((conf: &'static Conf), [
+        UnnecessaryWraps: crate::unnecessary_wraps::UnnecessaryWraps = crate::unnecessary_wraps::UnnecessaryWraps::new(conf),
+        NeedlessBorrowsForGenericArgs: crate::needless_borrows_for_generic_args::NeedlessBorrowsForGenericArgs<'tcx> = crate::needless_borrows_for_generic_args::NeedlessBorrowsForGenericArgs::new(conf),
         NeedlessPassByValue: crate::needless_pass_by_value::NeedlessPassByValue = crate::needless_pass_by_value::NeedlessPassByValue,
         RedundantClone: crate::redundant_clone::RedundantClone = crate::redundant_clone::RedundantClone,
         UnportableVariant: crate::enum_clike::UnportableVariant = crate::enum_clike::UnportableVariant,
@@ -115,6 +117,11 @@ fn inputs_available(lints: &LintVec) -> bool {
 fn requires_source_input(lint: &rustc_lint::Lint) -> bool {
     std::ptr::eq(lint, crate::needless_pass_by_value::NEEDLESS_PASS_BY_VALUE)
         || std::ptr::eq(lint, crate::redundant_clone::REDUNDANT_CLONE)
+        || std::ptr::eq(lint, crate::unnecessary_wraps::UNNECESSARY_WRAPS)
+        || std::ptr::eq(
+            lint,
+            crate::needless_borrows_for_generic_args::NEEDLESS_BORROWS_FOR_GENERIC_ARGS,
+        )
 }
 
 /// Metadata for the audited passes, used for activation and coverage checks.
