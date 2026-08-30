@@ -2,8 +2,8 @@
 //! crate-identity changes are needed: changed inputs invalidate the previous query graph.
 
 use std::fs::File;
-use std::hash::{Hash, Hasher};
-use std::io::{self, Read};
+use std::hash::{Hash as _, Hasher as _};
+use std::io::{self, Read as _};
 
 use rustc_data_structures::fingerprint::Fingerprint;
 use rustc_data_structures::stable_hash::StableHasher;
@@ -40,11 +40,7 @@ mod configuration {
     use super::*;
 
     /// Enable only audited module passes after all non-query inputs have a compatible key.
-    pub(crate) fn configure(
-        config: &mut Config,
-        lookup: &clippy_config::ConfigSnapshot,
-        args: Option<&str>,
-    ) -> bool {
+    pub(crate) fn configure(config: &mut Config, lookup: &clippy_config::ConfigSnapshot, args: Option<&str>) -> bool {
         if config.opts.incremental.is_none() || config.file_loader.is_some() {
             return false;
         }
