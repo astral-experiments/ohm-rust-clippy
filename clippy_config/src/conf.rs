@@ -10,8 +10,8 @@ use rustc_data_structures::fx::FxHashSet;
 use rustc_errors::Applicability;
 use rustc_hir::attrs::RustcVersion;
 use rustc_session::Session;
+use rustc_span::source_map::{FileLoader as _, RealFileLoader};
 use rustc_span::{FileName, Pos as _, SourceFile, Symbol};
-use rustc_span::source_map::{FileLoader, RealFileLoader};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use std::{env, fs, io};
@@ -874,7 +874,11 @@ impl ConfigSnapshot {
         }
         self.source.as_ref().map(|(path, contents)| {
             let source_map = sess.source_map();
-            let filename = FileName::Real(source_map.path_mapping().to_real_filename(source_map.working_dir(), path));
+            let filename = FileName::Real(
+                source_map
+                    .path_mapping()
+                    .to_real_filename(source_map.working_dir(), path),
+            );
             source_map.new_source_file(filename, contents.clone())
         })
     }
@@ -884,7 +888,11 @@ impl ConfigSnapshot {
 pub fn snapshot_conf_file() -> ConfigSnapshot {
     let mut diagnostics = Vec::new();
     let source = find_conf_file(
-        |path| RealFileLoader.read_file(path).map(|contents| (path.to_owned(), contents)),
+        |path| {
+            RealFileLoader
+                .read_file(path)
+                .map(|contents| (path.to_owned(), contents))
+        },
         |is_error, message| diagnostics.push((is_error, message)),
     );
     ConfigSnapshot { source, diagnostics }
@@ -905,10 +913,7 @@ fn load_conf_file(sess: &Session) -> Option<Arc<SourceFile>> {
     )
 }
 
-fn find_conf_file<T>(
-    mut read: impl FnMut(&Path) -> io::Result<T>,
-    mut emit: impl FnMut(bool, String),
-) -> Option<T> {
+fn find_conf_file<T>(mut read: impl FnMut(&Path) -> io::Result<T>, mut emit: impl FnMut(bool, String)) -> Option<T> {
     /// Possible filename to search for.
     const CONFIG_FILE_NAMES: [&str; 2] = [".clippy.toml", "clippy.toml"];
 
@@ -940,11 +945,14 @@ fn find_conf_file<T>(
                 if let Some((loaded_path, _)) = &loaded_config {
                     if fs::metadata(loaded_path).is_ok_and(|x| x.is_file()) {
                         // Warn if `.clippy.toml` and `clippy.toml` exist
-                        emit(false, format!(
-                            "using config file `{}`, `{}` will be ignored",
-                            loaded_path.display(),
-                            config_path.display(),
-                        ));
+                        emit(
+                            false,
+                            format!(
+                                "using config file `{}`, `{}` will be ignored",
+                                loaded_path.display(),
+                                config_path.display(),
+                            ),
+                        );
                     }
                 } else {
                     match read(&config_path) {

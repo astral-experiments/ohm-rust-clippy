@@ -53,7 +53,10 @@ fn replacing_a_same_version_driver_reruns_cargo() {
     .unwrap();
     let driver = root.path().join("clippy-driver");
     fs::copy(env!("CARGO_BIN_EXE_clippy-driver"), &driver).unwrap();
-    filetime::set_file_mtime(&driver, filetime::FileTime::from_unix_time(1, 0)).unwrap();
+    fs::File::open(&driver)
+        .unwrap()
+        .set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1))
+        .unwrap();
     let version = Command::new(&driver).arg("--version").output().unwrap();
     assert!(version.status.success());
 
@@ -64,7 +67,7 @@ fn replacing_a_same_version_driver_reruns_cargo() {
     fs::copy(env!("CARGO_BIN_EXE_clippy-driver"), &replacement).unwrap();
     #[cfg(target_os = "linux")]
     {
-        use std::io::Write;
+        use std::io::Write as _;
         // Non-loadable ELF bytes preserve behavior/version but change the driver hash.
         fs::OpenOptions::new()
             .append(true)
@@ -75,7 +78,10 @@ fn replacing_a_same_version_driver_reruns_cargo() {
     }
     // macOS's fs::copy preserves the original driver's modification time. Model an
     // actual newly built replacement, whose timestamp is later than the last check.
-    filetime::set_file_mtime(&replacement, filetime::FileTime::now()).unwrap();
+    fs::File::open(&replacement)
+        .unwrap()
+        .set_modified(std::time::SystemTime::now())
+        .unwrap();
     fs::rename(replacement, &driver).unwrap();
     let replaced_version = Command::new(&driver).arg("--version").output().unwrap();
     assert!(replaced_version.status.success());
