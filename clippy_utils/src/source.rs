@@ -2,7 +2,7 @@
 
 #![expect(clippy::module_name_repetitions)]
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use rustc_ast::{LitKind, StrStyle};
 use rustc_errors::Applicability;
@@ -13,12 +13,45 @@ use rustc_middle::ty::TyCtxt;
 use rustc_session::Session;
 use rustc_span::source_map::{SourceMap, original_sp};
 use rustc_span::{
-    BytePos, DUMMY_SP, DesugaringKind, Pos as _, RelativeBytePos, SourceFile, SourceFileAndLine, Span, SpanData,
-    SyntaxContext, hygiene,
+    BytePos as _, DUMMY_SP, DesugaringKind, Pos as _, RelativeBytePos as _, SourceFile, SourceFileAndLine, Span, SpanData,
+    StableSourceFileId, SyntaxContext, hygiene,
 };
 use std::borrow::Cow;
 use std::fmt;
 use std::ops::{Deref, Index, Range};
+
+/// The driver installs this only when rustc supports tracked source-file inputs.
+pub static SOURCE_FILE_INPUT: OnceLock<for<'tcx> fn(TyCtxt<'tcx>, StableSourceFileId)> = OnceLock::new();
+
+/// Record the source files used by a source-sensitive lint, including failed snippet reads.
+///
+/// Only audited module passes use this hook. Whole-crate passes need no dependency.
+fn track_span_source(cx: &LateContext<'_>, span: Span) {
+    if cx.only_module {
+        let track = SOURCE_FILE_INPUT
+            .get()
+            .expect("source-sensitive module pass requires tracked inputs");
+        let sm = cx.tcx.sess.source_map();
+        let start = sm.lookup_source_file(span.lo());
+        let end = sm.lookup_source_file(span.hi());
+        track(cx.tcx, start.stable_id);
+        if start.stable_id != end.stable_id {
+            track(cx.tcx, end.stable_id);
+        }
+    }
+}
+
+/// Read source text while recording its file contents as an incremental input.
+pub fn tracked_text(cx: &LateContext<'_>, span: Span) -> Option<SourceText> {
+    track_span_source(cx, span);
+    span.get_text(cx)
+}
+
+/// Extract a snippet while recording its file contents as an incremental input.
+pub fn tracked_snippet<'a>(cx: &LateContext<'_>, span: Span, default: &'a str) -> Cow<'a, str> {
+    track_span_source(cx, span);
+    snippet(cx, span, default)
+}
 
 pub trait HasSourceMap<'sm>: Copy {
     #[must_use]

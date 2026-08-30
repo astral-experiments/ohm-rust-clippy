@@ -368,5 +368,19 @@
       "ref_patterns"
     ],
     "source": "pub fn f() { let ref x = 1; let _ = x; }"
+  },
+  {
+    "lints": [
+      "needless_pass_by_value"
+    ],
+    "source": "pub fn f(value: Vec<u8>) -> Vec<u8> { value.clone() }",
+    "pass": "NeedlessPassByValue"
+  },
+  {
+    "lints": [
+      "redundant_clone"
+    ],
+    "source": "pub fn f(value: String) -> String { value.clone() }",
+    "pass": "RedundantClone"
   }
 ]

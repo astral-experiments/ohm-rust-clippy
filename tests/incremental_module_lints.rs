@@ -18,6 +18,7 @@ struct Fixture {
     command_line_lint: bool,
     lints: Vec<String>,
     whole_crate_reference: bool,
+    expect_source_input: bool,
 }
 
 impl Fixture {
@@ -30,6 +31,7 @@ impl Fixture {
             command_line_lint: true,
             lints: vec![LINT.into()],
             whole_crate_reference: false,
+            expect_source_input: false,
         };
         fixture.write("lib.rs", "pub mod value;\npub mod first;\npub mod second;\n");
         fixture.write("value.rs", "pub struct Value;\n");
@@ -106,6 +108,9 @@ impl Fixture {
         }
         if let Some(incremental) = incremental {
             command.arg(format!("-Cincremental={}", incremental.display()));
+            if self.expect_source_input {
+                command.arg("-Zincremental-info");
+            }
             if let Some(state) = cache_state {
                 command.arg(format!("-Zassert-incr-state={state}"));
             }
@@ -113,6 +118,12 @@ impl Fixture {
         let output = command.output().unwrap();
         let stderr = String::from_utf8(output.stderr).unwrap();
         assert!(output.status.success(), "{command:?}\n{stderr}");
+        if self.expect_source_input && command_line_lint && cache_state == Some("not-loaded") {
+            assert!(
+                stderr.contains("source_file_hash"),
+                "source-sensitive lints fell back instead of recording source inputs: {stderr}"
+            );
+        }
         let diagnostics = stderr
             .lines()
             .filter_map(|line| serde_json::from_str::<Value>(line).ok())
@@ -517,6 +528,126 @@ fn configuration_changes_affect_cached_lints() {
         );
         fixture.check_counts(
             &[("clippy::unused_self", 0), ("clippy::large_const_arrays", 0)],
+            "loaded",
+        );
+    }
+}
+
+#[test]
+#[cfg(ohm_source_file_hash)]
+fn source_sensitive_ui_cases_replay_in_an_unchanged_module() {
+    for (lint, source) in [
+        (
+            "clippy::needless_pass_by_value",
+            include_str!("ui/needless_pass_by_value.rs"),
+        ),
+        ("clippy::redundant_clone", include_str!("ui/redundant_clone.rs")),
+    ] {
+        for threads in [1, 4] {
+            let mut fixture = Fixture::new(threads);
+            fixture.lints = vec![lint.into()];
+            fixture.whole_crate_reference = true;
+            fixture.expect_source_input = true;
+            fixture.write("lib.rs", "pub mod examples;\npub fn unrelated() -> u8 { 1 + 1 }\n");
+            fixture.write("examples.rs", source);
+            assert!(count(&fixture.compare(Some("not-loaded")), lint) > 0);
+            fixture.replace("lib.rs", "1 + 1", "2 + 1");
+            fixture.compare(Some("loaded"));
+            fixture.compare(Some("loaded"));
+            fixture.write("examples.rs", &format!("// move spans\n{source}"));
+            fixture.compare(Some("loaded"));
+        }
+    }
+}
+
+#[test]
+#[cfg(ohm_source_file_hash)]
+fn source_sensitive_lints_observe_trait_changes() {
+    for threads in [1, 4] {
+        let mut fixture = Fixture::new(threads);
+        fixture.lints = vec![
+            "clippy::needless_pass_by_value".into(),
+            "clippy::redundant_clone".into(),
+        ];
+        fixture.whole_crate_reference = true;
+        fixture.write(
+            "lib.rs",
+            "#![warn(clippy::needless_pass_by_value, clippy::redundant_clone)]\npub mod first; pub mod second;\n",
+        );
+        fixture.write("first.rs", "use crate::second::S;\n#[allow(clippy::needless_pass_by_value)]\npub fn redundant(value: S) -> S { value.clone() }\npub fn borrowed(value: S) -> u8 { value.0 }\n");
+        fixture.write("second.rs", "#[derive(Clone)] pub struct S(pub u8);\n");
+        let counts = [("clippy::needless_pass_by_value", 1), ("clippy::redundant_clone", 1)];
+        fixture.check_counts(&counts, "not-loaded");
+        fixture.check_counts(&counts, "loaded");
+        fixture.write(
+            "second.rs",
+            "#[derive(Clone)] pub struct S(pub u8);\nimpl Copy for S {}\n",
+        );
+        fixture.check_counts(
+            &[("clippy::needless_pass_by_value", 0), ("clippy::redundant_clone", 0)],
+            "loaded",
+        );
+        fixture.check_counts(
+            &[("clippy::needless_pass_by_value", 0), ("clippy::redundant_clone", 0)],
+            "loaded",
+        );
+        fixture.write("second.rs", "#[derive(Clone)] pub struct S(pub u8);\n");
+        fixture.check_counts(&counts, "loaded");
+    }
+}
+
+#[test]
+#[cfg(ohm_source_file_hash)]
+fn source_text_changes_invalidate_suggestions() {
+    for threads in [1, 4] {
+        let mut fixture = Fixture::new(threads);
+        fixture.lints = vec![
+            "clippy::needless_pass_by_value".into(),
+            "clippy::redundant_clone".into(),
+        ];
+        fixture.whole_crate_reference = true;
+        fixture.expect_source_input = true;
+        fixture.write(
+            "lib.rs",
+            "#![warn(clippy::needless_pass_by_value, clippy::redundant_clone)]\npub mod first; pub mod second;\n",
+        );
+        let source = "#[allow(clippy::needless_pass_by_value)]\npub fn redundant(value: String) -> String { value.clone    () }\n#[allow(clippy::redundant_clone)]\npub fn borrowed(value: Vec<u8>) -> Vec<u8> { value.clone    () }\n";
+        for module in ["first.rs", "second.rs"] {
+            fixture.write(module, source);
+        }
+        let counts = [("clippy::needless_pass_by_value", 2), ("clippy::redundant_clone", 2)];
+        fixture.check_counts(&counts, "not-loaded");
+        fixture.check_counts(&counts, "loaded");
+
+        // Identical token positions and HIR, but different suggestion text/applicability.
+        fixture.replace("first.rs", "clone    ()", "clone/**/()");
+        fixture.check_counts(&counts, "loaded");
+        let changed = fixture.compare(Some("loaded"));
+        assert!(changed.iter().any(|diagnostic| {
+            diagnostic["code"]["code"] == "clippy::needless_pass_by_value"
+                && diagnostic.to_string().contains("value.clone/**/()")
+        }));
+        assert!(changed.iter().any(|diagnostic| {
+            diagnostic["code"]["code"] == "clippy::redundant_clone"
+                && diagnostic["children"].as_array().unwrap().iter().any(|child| {
+                    child["spans"].as_array().unwrap().iter().any(|span| {
+                        span["file_name"] == "first.rs" && span["suggestion_applicability"] == "MaybeIncorrect"
+                    })
+                })
+        }));
+        fixture.replace("first.rs", "clone/**/()", "clone    ()");
+        fixture.check_counts(&counts, "loaded");
+
+        // Source-file identities must not rely on their order in the source map.
+        fixture.replace(
+            "lib.rs",
+            "pub mod first; pub mod second;",
+            "pub mod second; pub mod first;",
+        );
+        fixture.check_counts(&counts, "loaded");
+        fixture.replace("second.rs", "value.clone    ()", "value");
+        fixture.check_counts(
+            &[("clippy::needless_pass_by_value", 1), ("clippy::redundant_clone", 1)],
             "loaded",
         );
     }
