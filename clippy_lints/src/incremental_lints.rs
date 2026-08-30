@@ -36,6 +36,8 @@ macro_rules! audited_passes {
 
 #[rustfmt::skip]
 audited_passes!((conf: &'static Conf), [
+        NeedlessPassByValue: crate::needless_pass_by_value::NeedlessPassByValue = crate::needless_pass_by_value::NeedlessPassByValue,
+        RedundantClone: crate::redundant_clone::RedundantClone = crate::redundant_clone::RedundantClone,
         UnportableVariant: crate::enum_clike::UnportableVariant = crate::enum_clike::UnportableVariant,
         FloatLiteral: crate::float_literal::FloatLiteral = crate::float_literal::FloatLiteral::new(conf),
         UnitReturnExpectingOrd: crate::unit_return_expecting_ord::UnitReturnExpectingOrd = crate::unit_return_expecting_ord::UnitReturnExpectingOrd,
@@ -95,14 +97,24 @@ pub(crate) fn register(store: &mut rustc_lint::LintStore, conf: &'static Conf) {
     store.register_late_lint_mod_pass(Box::new(move |tcx| {
         let skippable_lints = tcx.skippable_lints(());
         Box::new(IncrementalLateLintPass::new(conf, &|lints| {
-            is_lint_pass_required(skippable_lints, lints)
+            is_lint_pass_required(skippable_lints, lints) && inputs_available(lints)
         }))
     }));
 }
 
 /// Whether a complete late pass has moved to the module traversal.
 pub(crate) fn contains_pass(lints: &LintVec) -> bool {
-    lints.iter().any(|lint| lint_ids().contains(&LintId::of(lint)))
+    inputs_available(lints) && lints.iter().any(|lint| lint_ids().contains(&LintId::of(lint)))
+}
+
+/// Older compilers retain the whole-crate traversal for source-sensitive passes.
+fn inputs_available(lints: &LintVec) -> bool {
+    clippy_utils::source::SOURCE_FILE_INPUT.get().is_some() || !lints.iter().any(|lint| requires_source_input(lint))
+}
+
+fn requires_source_input(lint: &rustc_lint::Lint) -> bool {
+    std::ptr::eq(lint, crate::needless_pass_by_value::NEEDLESS_PASS_BY_VALUE)
+        || std::ptr::eq(lint, crate::redundant_clone::REDUNDANT_CLONE)
 }
 
 /// Metadata for the audited passes, used for activation and coverage checks.
@@ -117,6 +129,9 @@ pub fn lints() -> impl Iterator<Item = &'static LintInfo> {
 /// the command line. Attribute-only activation retains the whole-crate traversal.
 pub fn enabled(options: &Options) -> bool {
     lints().any(|info| {
+        if requires_source_input(info.lint) && clippy_utils::source::SOURCE_FILE_INPUT.get().is_none() {
+            return false;
+        }
         let name = info.lint.name_lower();
         let group = format!("clippy::{}", info.category.name());
         let in_all = matches!(
