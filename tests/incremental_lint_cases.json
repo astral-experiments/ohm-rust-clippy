@@ -382,5 +382,19 @@
     ],
     "source": "pub fn f(value: String) -> String { value.clone() }",
     "pass": "RedundantClone"
+  },
+  {
+    "pass": "UnnecessaryWraps",
+    "lints": [
+      "unnecessary_wraps"
+    ],
+    "source": "pub fn f() -> Option<u8> { Some(1) }"
+  },
+  {
+    "pass": "NeedlessBorrowsForGenericArgs",
+    "lints": [
+      "needless_borrows_for_generic_args"
+    ],
+    "source": "fn take(_: impl AsRef<str>) {} pub fn f() { take(&\"value\"); }"
   }
 ]

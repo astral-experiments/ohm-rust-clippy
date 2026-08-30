@@ -3,7 +3,7 @@ use std::borrow::Cow;
 use clippy_config::Conf;
 use clippy_utils::diagnostics::span_lint_and_then;
 use clippy_utils::res::{MaybeDef as _, MaybeQPath as _};
-use clippy_utils::source::snippet;
+use clippy_utils::source::tracked_snippet;
 use clippy_utils::visitors::find_all_ret_expressions;
 use clippy_utils::{contains_return, return_ty};
 use rustc_attr_ir::lang_items::LangItem::{OptionSome, ResultOk};
@@ -131,7 +131,7 @@ impl<'tcx> LateLintPass<'tcx> for UnnecessaryWraps {
                     if inner_type.is_unit() {
                         String::new()
                     } else {
-                        snippet(cx, arg.span.source_callsite(), "..").to_string()
+                        tracked_snippet(cx, arg.span.source_callsite(), "..").to_string()
                     },
                 ));
                 true
