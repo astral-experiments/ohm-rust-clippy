@@ -186,6 +186,12 @@ pub fn first_node_in_macro(cx: &LateContext<'_>, node: &impl HirNode) -> Option<
         return None;
     }
 
+    // A value memoized by another query (or the whole-crate pass) does not carry its
+    // dependency reads into this module query. Recompute so its parent HIR is tracked.
+    if cx.only_module {
+        return first_node_in_macro_uncached(cx, node);
+    }
+
     // The macro lints each query this for the node currently being visited, and the combined late
     // pass runs all their `check_*` callbacks on that node back to back, so the redundant queries
     // are consecutive. A single-slot memo of the last node collapses them to one backtrace walk in
