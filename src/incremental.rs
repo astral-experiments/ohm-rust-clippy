@@ -36,7 +36,6 @@ mod configuration {
     use std::env;
 
     use rustc_interface::interface::Config;
-    use rustc_session::lint::Level;
 
     use super::*;
 
@@ -49,10 +48,7 @@ mod configuration {
         if config.opts.incremental.is_none() || config.file_loader.is_some() {
             return false;
         }
-        // Attribute-only activation remains correct through the whole-crate pass.
-        if !config.opts.lint_opts.iter().any(|(name, level)| {
-            matches!(name.as_str(), "clippy::pedantic" | "clippy::zero_sized_map_values") && *level != Level::Allow
-        }) {
+        if !clippy_lints::incremental_lints::enabled(&config.opts) {
             return false;
         }
         if lookup.has_errors() {

@@ -18,6 +18,7 @@
     - [Defining Lints](development/defining_lints.md)
     - [Writing tests](development/writing_tests.md)
     - [Lint Passes](development/lint_passes.md)
+    - [Incremental Late Lints](development/incremental_lints.md)
     - [Emitting lints](development/emitting_lints.md)
     - [Type Checking](development/type_checking.md)
     - [Trait Checking](development/trait_checking.md)

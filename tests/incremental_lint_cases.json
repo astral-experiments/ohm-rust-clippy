@@ -1,0 +1,372 @@
+[
+  {
+    "pass": "UnportableVariant",
+    "lints": [
+      "enum_clike_unportable_variant"
+    ],
+    "source": "#[repr(isize)] pub enum E { V = 4294967296 }"
+  },
+  {
+    "pass": "FloatLiteral",
+    "lints": [
+      "excessive_precision",
+      "lossy_float_literal"
+    ],
+    "source": "pub fn f() -> (f32, f32) { (1.2345678901234567_f32, 16777217.0_f32) }"
+  },
+  {
+    "pass": "UnitReturnExpectingOrd",
+    "lints": [
+      "unit_return_expecting_ord"
+    ],
+    "source": "pub fn f() { let mut a = [1, 2]; a.sort_by_key(|x| { *x; }); }"
+  },
+  {
+    "pass": "ApproxConstant",
+    "lints": [
+      "approx_constant"
+    ],
+    "source": "pub fn f() -> f64 { 3.14159 }"
+  },
+  {
+    "pass": "NeedlessQuestionMark",
+    "lints": [
+      "needless_question_mark"
+    ],
+    "source": "pub fn f(x: Option<u8>) -> Option<u8> { Some(x?) }"
+  },
+  {
+    "pass": "SizeOfInElementCount",
+    "lints": [
+      "size_of_in_element_count"
+    ],
+    "source": "pub unsafe fn f(a: *const u64, b: *mut u64) { unsafe { std::ptr::copy_nonoverlapping(a, b, std::mem::size_of::<u64>()); } }"
+  },
+  {
+    "pass": "NeedlessUpdate",
+    "lints": [
+      "needless_update"
+    ],
+    "source": "pub struct S { a: u8 } pub fn f(s: S) -> S { S { a: 1, ..s } }"
+  },
+  {
+    "pass": "NeedlessBorrowedRef",
+    "lints": [
+      "needless_borrowed_reference"
+    ],
+    "source": "pub fn f() { let &ref x = &1; let _ = x; }"
+  },
+  {
+    "pass": "TemporaryAssignment",
+    "lints": [
+      "temporary_assignment"
+    ],
+    "source": "pub fn f() { (1, 2).0 = 3; }"
+  },
+  {
+    "pass": "BoxedLocal",
+    "lints": [
+      "boxed_local"
+    ],
+    "source": "pub fn f(x: Box<u32>) -> u32 { *x }"
+  },
+  {
+    "pass": "CopyIterator",
+    "lints": [
+      "copy_iterator"
+    ],
+    "source": "#[derive(Clone, Copy)] pub struct S; impl Iterator for S { type Item = (); fn next(&mut self) -> Option<()> { None } }"
+  },
+  {
+    "pass": "EvalOrderDependence",
+    "lints": [
+      "diverging_sub_expression",
+      "mixed_read_write_in_expression"
+    ],
+    "source": "pub fn f(mut x: u32) { let _ = (x, { x = 2; x }); let _ = (return, 1); }"
+  },
+  {
+    "pass": "PartialEqNeImpl",
+    "lints": [
+      "partialeq_ne_impl"
+    ],
+    "source": "pub struct S; impl PartialEq for S { fn eq(&self, _: &Self) -> bool { true } fn ne(&self, _: &Self) -> bool { false } }"
+  },
+  {
+    "pass": "InfiniteIter",
+    "lints": [
+      "infinite_iter",
+      "maybe_infinite_iter"
+    ],
+    "source": "pub fn f() { let _ = (0..).count(); let _ = (0..).find(|_| false); }"
+  },
+  {
+    "pass": "FallibleImplFrom",
+    "lints": [
+      "fallible_impl_from"
+    ],
+    "source": "pub struct S; impl From<u8> for S { fn from(_: u8) -> Self { panic!(\"no\") } }"
+  },
+  {
+    "pass": "QuestionMarkUsed",
+    "lints": [
+      "question_mark_used"
+    ],
+    "source": "pub fn f(x: Option<u8>) -> Option<u8> { let v = x?; Some(v + 1) }"
+  },
+  {
+    "pass": "SuspiciousImpl",
+    "lints": [
+      "suspicious_arithmetic_impl",
+      "suspicious_op_assign_impl"
+    ],
+    "source": "pub struct S(u8); impl std::ops::Add for S { type Output = Self; fn add(self, rhs: Self) -> Self { S(self.0 - rhs.0) } } impl std::ops::AddAssign for S { fn add_assign(&mut self, rhs: Self) { self.0 -= rhs.0; } }"
+  },
+  {
+    "pass": "InherentToString",
+    "lints": [
+      "inherent_to_string",
+      "inherent_to_string_shadow_display"
+    ],
+    "source": "pub struct A; impl A { pub fn to_string(&self) -> String { String::new() } } pub struct B; impl B { pub fn to_string(&self) -> String { String::new() } } impl std::fmt::Display for B { fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { f.write_str(\"B\") } }"
+  },
+  {
+    "pass": "UnusedSelf",
+    "lints": [
+      "unused_self"
+    ],
+    "source": "pub struct S; impl S { pub fn f(&self) -> u8 { 1 } }"
+  },
+  {
+    "pass": "DebugAssertWithMutCall",
+    "lints": [
+      "debug_assert_with_mut_call"
+    ],
+    "source": "pub fn g(x: &mut u8) -> bool { *x += 1; true } pub fn f() { debug_assert!(g(&mut 0)); }"
+  },
+  {
+    "pass": "LargeConstArrays",
+    "lints": [
+      "large_const_arrays"
+    ],
+    "source": "pub const LARGE: [u8; 32] = [0; 32];"
+  },
+  {
+    "pass": "ExcessiveBools",
+    "lints": [
+      "fn_params_excessive_bools",
+      "struct_excessive_bools"
+    ],
+    "source": "pub struct S { a: bool, b: bool, c: bool, d: bool } pub fn f(a: bool, b: bool, c: bool, d: bool) {}"
+  },
+  {
+    "pass": "PanicInResultFn",
+    "lints": [
+      "panic_in_result_fn"
+    ],
+    "source": "pub fn f() -> Result<u8, ()> { panic!(\"no\") }"
+  },
+  {
+    "pass": "EmptyDrop",
+    "lints": [
+      "empty_drop"
+    ],
+    "source": "pub struct S; impl Drop for S { fn drop(&mut self) {} }"
+  },
+  {
+    "pass": "ZeroSizedMapValues",
+    "lints": [
+      "zero_sized_map_values"
+    ],
+    "source": "pub type Map = std::collections::HashMap<u8, ()>;"
+  },
+  {
+    "pass": "SelfNamedConstructors",
+    "lints": [
+      "self_named_constructors"
+    ],
+    "source": "pub struct Thing; impl Thing { pub fn thing() -> Self { Self } }"
+  },
+  {
+    "pass": "IterNotReturningIterator",
+    "lints": [
+      "iter_not_returning_iterator"
+    ],
+    "source": "pub struct S; impl S { pub fn iter(&self) -> u8 { 0 } }"
+  },
+  {
+    "pass": "DefaultUnionRepresentation",
+    "lints": [
+      "default_union_representation"
+    ],
+    "source": "pub union U { pub a: u32, pub b: f32 }"
+  },
+  {
+    "pass": "UnnecessaryOwnedEmptyStrings",
+    "lints": [
+      "unnecessary_owned_empty_strings"
+    ],
+    "source": "pub fn f() { let _: &str = &String::new(); }"
+  },
+  {
+    "pass": "TypeParamMismatch",
+    "lints": [
+      "mismatching_type_param_order"
+    ],
+    "source": "pub struct S<A, B>(A, B); impl<B, A> S<B, A> {}"
+  },
+  {
+    "pass": "UnusedPeekable",
+    "lints": [
+      "unused_peekable"
+    ],
+    "source": "pub fn f() { let p = (0..3).peekable(); for _ in p {} }"
+  },
+  {
+    "pass": "FromRawWithVoidPtr",
+    "lints": [
+      "from_raw_with_void_ptr"
+    ],
+    "source": "pub unsafe fn f(p: *mut std::ffi::c_void) { let _ = unsafe { Box::from_raw(p) }; }"
+  },
+  {
+    "pass": "SizeOfRef",
+    "lints": [
+      "size_of_ref"
+    ],
+    "source": "pub fn f() -> usize { std::mem::size_of_val(&&1u32) }"
+  },
+  {
+    "pass": "MultipleUnsafeOpsPerBlock",
+    "lints": [
+      "multiple_unsafe_ops_per_block"
+    ],
+    "source": "pub unsafe fn f(p: *mut u32) { unsafe { let a = *p; *p = a + 1; } }"
+  },
+  {
+    "pass": "CollectionIsNeverRead",
+    "lints": [
+      "collection_is_never_read"
+    ],
+    "source": "pub fn f() { let mut v = Vec::<u8>::new(); v.push(1); }"
+  },
+  {
+    "pass": "ManualMainSeparatorStr",
+    "lints": [
+      "manual_main_separator_str"
+    ],
+    "source": "pub fn f() { let _: &str = &std::path::MAIN_SEPARATOR.to_string(); }"
+  },
+  {
+    "pass": "UnnecessaryBoxReturns",
+    "lints": [
+      "unnecessary_box_returns"
+    ],
+    "source": "pub fn f() -> Box<u32> { Box::new(1) }"
+  },
+  {
+    "pass": "MissingFieldsInDebug",
+    "lints": [
+      "missing_fields_in_debug"
+    ],
+    "source": "pub struct S { a: u8, b: u8 } impl std::fmt::Debug for S { fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { f.debug_struct(\"S\").field(\"a\", &self.a).finish() } }"
+  },
+  {
+    "pass": "RedundantTypeAnnotations",
+    "lints": [
+      "redundant_type_annotations"
+    ],
+    "source": "pub fn f() { let x: u32 = 1u32; let _ = x; }"
+  },
+  {
+    "pass": "ErrorImplError",
+    "lints": [
+      "error_impl_error"
+    ],
+    "source": "#[derive(Debug)] pub struct Error; impl std::fmt::Display for Error { fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { f.write_str(\"error\") } } impl std::error::Error for Error {}"
+  },
+  {
+    "pass": "IgnoredUnitPatterns",
+    "lints": [
+      "ignored_unit_patterns"
+    ],
+    "source": "pub fn f() { let _ = (); }"
+  },
+  {
+    "pass": "IterOverHashType",
+    "lints": [
+      "iter_over_hash_type"
+    ],
+    "source": "pub fn f(map: std::collections::HashMap<u8, u8>) { for _ in map {} }"
+  },
+  {
+    "pass": "ImplHashWithBorrowStrBytes",
+    "lints": [
+      "impl_hash_borrow_with_str_and_bytes"
+    ],
+    "source": "pub struct S; impl std::borrow::Borrow<str> for S { fn borrow(&self) -> &str { \"\" } } impl std::borrow::Borrow<[u8]> for S { fn borrow(&self) -> &[u8] { b\"\" } } impl std::hash::Hash for S { fn hash<H: std::hash::Hasher>(&self, _: &mut H) {} }"
+  },
+  {
+    "pass": "PubUnderscoreFields",
+    "lints": [
+      "pub_underscore_fields"
+    ],
+    "source": "pub struct S { pub _value: u8 }"
+  },
+  {
+    "pass": "ToStringTraitImpl",
+    "lints": [
+      "to_string_trait_impl"
+    ],
+    "source": "pub struct S; impl ToString for S { fn to_string(&self) -> String { String::new() } }"
+  },
+  {
+    "pass": "PointersInNomemAsmBlock",
+    "lints": [
+      "pointers_in_nomem_asm_block"
+    ],
+    "source": "pub unsafe fn f(p: *const u8) { unsafe { std::arch::asm!(\"/* {0} */\", in(reg) p, options(nomem)); } }"
+  },
+  {
+    "pass": "UnnecessaryLiteralBound",
+    "lints": [
+      "unnecessary_literal_bound"
+    ],
+    "source": "pub fn f(_: &str) -> &str { \"static\" }"
+  },
+  {
+    "pass": "SingleOptionMap",
+    "lints": [
+      "single_option_map"
+    ],
+    "source": "pub fn f(x: Option<u32>) -> Option<u32> { x.map(|n| n + 1) }"
+  },
+  {
+    "pass": "InfallibleTryFrom",
+    "lints": [
+      "infallible_try_from"
+    ],
+    "source": "pub struct S; impl TryFrom<u8> for S { type Error = std::convert::Infallible; fn try_from(_: u8) -> Result<Self, Self::Error> { Ok(S) } }"
+  },
+  {
+    "pass": "VolatileComposites",
+    "lints": [
+      "volatile_composites"
+    ],
+    "source": "pub unsafe fn f(p: *const (u32, u32)) { let _ = unsafe { p.read_volatile() }; }"
+  },
+  {
+    "pass": "ManualNoopWaker",
+    "lints": [
+      "manual_noop_waker"
+    ],
+    "source": "pub struct S; impl std::task::Wake for S { fn wake(self: std::sync::Arc<Self>) {} }"
+  },
+  {
+    "pass": "RefPatterns",
+    "lints": [
+      "ref_patterns"
+    ],
+    "source": "pub fn f() { let ref x = 1; let _ = x; }"
+  }
+]
