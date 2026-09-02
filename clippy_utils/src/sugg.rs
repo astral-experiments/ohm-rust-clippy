@@ -1,7 +1,7 @@
 //! Contains utility functions to generate suggestions.
 #![deny(clippy::missing_docs_in_private_items)]
 
-use crate::source::{snippet, snippet_opt, snippet_with_applicability, snippet_with_context};
+use crate::source::{HasSourceMap, snippet, snippet_opt, snippet_with_applicability, snippet_with_context};
 use crate::ty::expr_sig;
 use crate::{get_parent_expr_for_hir, higher};
 use rustc_ast::util::parser::AssocOp;
@@ -10,7 +10,7 @@ use rustc_data_structures::fx::FxHashSet;
 use rustc_errors::Applicability;
 use rustc_hir::{self as hir, Closure, ExprKind, HirId, MatchSource, MutTy, Node, TyKind};
 use rustc_hir_typeck::expr_use_visitor::{Delegate, ExprUseVisitor, PlaceBase, PlaceWithHirId};
-use rustc_lint::{EarlyContext, LateContext, LintContext};
+use rustc_lint::{LateContext, LintContext};
 use rustc_middle::hir::place::ProjectionKind;
 use rustc_middle::mir::{FakeReadCause, Mutability};
 use rustc_middle::ty;
@@ -194,13 +194,14 @@ impl<'a> Sugg<'a> {
     }
 
     /// Prepare a suggestion from an expression.
-    pub fn ast(
-        cx: &EarlyContext<'_>,
+    pub fn ast<'sm>(
+        cx: impl HasSourceMap<'sm>,
         expr: &ast::Expr,
         default: &'a str,
         ctxt: SyntaxContext,
         app: &mut Applicability,
     ) -> Self {
+        let cx = cx.source_map();
         let mut snippet = |span: Span| snippet_with_context(cx, span, ctxt, default, app).0;
 
         match expr.kind {

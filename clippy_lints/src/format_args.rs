@@ -405,10 +405,13 @@ impl<'tcx> FormatArgsExpr<'_, 'tcx> {
             if let FormatArgsPiece::Placeholder(placeholder) = piece
                 && let Ok(index) = placeholder.argument.index
                 && let Some(arg) = self.format_args.arguments.all_args().get(index)
-                && let Some(arg_expr) = find_format_arg_expr(self.expr, arg)
             {
-                self.check_unused_format_specifier(placeholder, arg_expr);
                 self.check_useless_format_width(placeholder);
+                let Some(arg_expr) = find_format_arg_expr(self.expr, arg) else {
+                    self.check_lowered_argument(placeholder, &arg.expr);
+                    continue;
+                };
+                self.check_unused_format_specifier(placeholder, arg_expr);
                 self.check_useless_borrows_in_formatting(placeholder, arg_expr);
 
                 // Check width and precision arguments the same way as the value
@@ -500,13 +503,78 @@ impl<'tcx> FormatArgsExpr<'_, 'tcx> {
         }
     }
 
+    /// Formatting lowering removes literal arguments and absorbs nested format_args! calls.
+    /// Their syntax still determines these lints without requiring a surviving HIR expression.
+    fn check_lowered_argument(&self, placeholder: &FormatPlaceholder, arg: &rustc_ast::Expr) {
+        if !self.cx.tcx.sess.opts.unstable_opts.flatten_format_args {
+            return;
+        }
+        let inner = arg.peel_parens_and_refs();
+        if matches!(inner.kind, rustc_ast::ExprKind::FormatArgs(_)) {
+            self.emit_unused_format_specifier(placeholder, arg.span);
+        }
+        if arg.span.from_expansion()
+            || !matches!(placeholder.format_trait, Display | Debug)
+            || !matches!(inner.kind, rustc_ast::ExprKind::Lit(lit)
+                if matches!(rustc_ast::LitKind::from_token_lit(lit),
+                    Ok(rustc_ast::LitKind::Str(..) | rustc_ast::LitKind::Int(..))))
+        {
+            return;
+        }
+        let mut peeled = arg;
+        let mut only_mutable = true;
+        let mut has_mutable = false;
+        let mut has_borrow = false;
+        loop {
+            match &peeled.kind {
+                rustc_ast::ExprKind::Paren(inner) => peeled = inner,
+                rustc_ast::ExprKind::AddrOf(BorrowKind::Ref, mutability, inner) => {
+                    has_borrow = true;
+                    has_mutable |= *mutability == Mutability::Mut;
+                    only_mutable &= *mutability == Mutability::Mut;
+                    peeled = inner;
+                },
+                _ => break,
+            }
+        }
+        if has_borrow && let Some(snippet) = snippet_opt(self.cx, peeled.span) {
+            let name = self.cx.tcx.item_name(self.macro_call.def_id);
+            let message = if only_mutable {
+                "remove the redundant `&mut`"
+            } else if has_mutable {
+                "remove the redundant `&`/`&mut`"
+            } else {
+                "remove the redundant `&`"
+            };
+            span_lint_and_sugg(
+                self.cx,
+                USELESS_BORROWS_IN_FORMATTING,
+                arg.span,
+                format!("redundant reference in `{name}!` argument"),
+                message,
+                snippet,
+                Applicability::MachineApplicable,
+            );
+        }
+    }
+
     fn check_unused_format_specifier(&self, placeholder: &FormatPlaceholder, arg: &Expr<'_>) {
+        if self
+            .cx
+            .typeck_results()
+            .expr_ty(arg)
+            .peel_refs()
+            .is_lang_item(self.cx, LangItem::FormatArguments)
+        {
+            self.emit_unused_format_specifier(placeholder, arg.span);
+        }
+    }
+
+    fn emit_unused_format_specifier(&self, placeholder: &FormatPlaceholder, arg_span: Span) {
         let options = &placeholder.format_options;
 
         if let Some(placeholder_span) = placeholder.span
             && *options != FormatOptions::default()
-            && let ty = self.cx.typeck_results().expr_ty(arg).peel_refs()
-            && ty.is_lang_item(self.cx, LangItem::FormatArguments)
         {
             span_lint_and_then(
                 self.cx,
@@ -517,7 +585,7 @@ impl<'tcx> FormatArgsExpr<'_, 'tcx> {
                     let mut suggest_format = |spec| {
                         let message = format!("for the {spec} to apply consider using `format!()`");
 
-                        if let Some(mac_call) = matching_root_macro_call(self.cx, arg.span, sym::format_args_macro) {
+                        if let Some(mac_call) = matching_root_macro_call(self.cx, arg_span, sym::format_args_macro) {
                             diag.span_suggestion(
                                 self.cx.sess().source_map().span_until_char(mac_call.span, '!'),
                                 message,

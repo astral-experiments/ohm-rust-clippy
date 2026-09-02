@@ -1,4 +1,5 @@
 use std::iter;
+use std::sync::OnceLock;
 
 use rustc_data_structures::either::Either;
 use rustc_hir::{Expr, HirId};
@@ -8,6 +9,20 @@ use rustc_middle::mir::{
     BasicBlock, Body, InlineAsmOperand, Local, Location, Place, START_BLOCK, StatementKind, TerminatorKind, traversal,
 };
 use rustc_middle::ty::TyCtxt;
+use rustc_span::def_id::LocalDefId;
+
+/// Installed by a driver that can retain lint MIR independently of optimized codegen MIR.
+/// Keeping the compiler API behind this hook also supports building Clippy with upstream rustc.
+pub static LINT_MIR: OnceLock<for<'tcx> fn(TyCtxt<'tcx>, LocalDefId) -> &'tcx Body<'tcx>> = OnceLock::new();
+
+/// Returns MIR prepared for Clippy without changing the body used for code generation.
+/// Standalone Clippy configures its ordinary optimized MIR pipeline for linting instead.
+pub fn mir_for_lint(tcx: TyCtxt<'_>, def_id: LocalDefId) -> &Body<'_> {
+    match LINT_MIR.get() {
+        Some(mir) => mir(tcx, def_id),
+        None => tcx.optimized_mir(def_id),
+    }
+}
 
 mod possible_borrower;
 pub use possible_borrower::PossibleBorrowerMap;
@@ -144,7 +159,7 @@ pub fn used_exactly_once(mir: &Body<'_>, local: Local) -> Option<bool> {
 pub fn enclosing_mir(tcx: TyCtxt<'_>, hir_id: HirId) -> Option<&Body<'_>> {
     let body_owner_local_def_id = tcx.hir_enclosing_body_owner(hir_id);
     if tcx.hir_body_owner_kind(body_owner_local_def_id).is_fn_or_closure() {
-        Some(tcx.optimized_mir(body_owner_local_def_id.to_def_id()))
+        Some(mir_for_lint(tcx, body_owner_local_def_id))
     } else {
         None
     }

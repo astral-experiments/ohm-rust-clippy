@@ -103,6 +103,16 @@ fn track_clippy_args(sess: &Session, args_env_var: Option<&str>) {
     sess.env_depinfo
         .borrow_mut()
         .insert((sym::CLIPPY_ARGS, args_env_var.map(Symbol::intern)));
+    sess.env_depinfo.borrow_mut().insert((
+        Symbol::intern("CLIPPY_CODEGEN"),
+        env::var("CLIPPY_CODEGEN").ok().map(|value| Symbol::intern(&value)),
+    ));
+    sess.env_depinfo.borrow_mut().insert((
+        Symbol::intern("CLIPPY_CODEGEN_CONFIG"),
+        env::var("CLIPPY_CODEGEN_CONFIG")
+            .ok()
+            .map(|value| Symbol::intern(&value)),
+    ));
 }
 
 /// Track files that may be accessed at runtime in `file_depinfo` so that cargo will re-run clippy
@@ -148,11 +158,17 @@ impl rustc_driver::Callbacks for RustcCallbacks {
 
 struct ClippyCallbacks {
     clippy_args_var: Option<String>,
+    codegen: bool,
 }
 
 impl rustc_driver::Callbacks for ClippyCallbacks {
     #[expect(rustc::bad_opt_access, reason = "necessary in clippy driver to set `mir_opt_level`")]
     fn config(&mut self, config: &mut interface::Config) {
+        #[cfg(ohm_clippy_codegen)]
+        if self.codegen {
+            config.opts.unstable_opts.clippy_codegen = true;
+            clippy_utils::mir::LINT_MIR.get_or_init(|| |tcx, id| tcx.mir_for_lint(id));
+        }
         #[cfg(ohm_source_file_hash)]
         clippy_utils::source::SOURCE_FILE_INPUT.get_or_init(|| {
             |tcx, id| {
@@ -207,12 +223,15 @@ impl rustc_driver::Callbacks for ClippyCallbacks {
         // run on the unoptimized MIR. On the other hand this results in some false negatives. If
         // MIR passes can be enabled / disabled separately, we should figure out, what passes to
         // use for Clippy.
-        config.opts.unstable_opts.mir_opt_level = Some(0);
-        config.opts.unstable_opts.mir_enable_passes =
-            vec![("CheckNull".to_owned(), false), ("CheckAlignment".to_owned(), false)];
+        if !self.codegen {
+            config.opts.unstable_opts.mir_opt_level = Some(0);
+            config.opts.unstable_opts.mir_enable_passes =
+                vec![("CheckNull".to_owned(), false), ("CheckAlignment".to_owned(), false)];
 
-        // Disable flattening and inlining of format_args!(), so the HIR matches with the AST.
-        config.opts.unstable_opts.flatten_format_args = false;
+            // Standalone Clippy retains format arguments in HIR. Codegen mode uses AST
+            // information for arguments removed by ordinary format-argument lowering.
+            config.opts.unstable_opts.flatten_format_args = false;
+        }
     }
 }
 
@@ -280,6 +299,20 @@ fn main() -> ExitCode {
             return ExitCode::SUCCESS;
         }
 
+        if orig_args
+            .get(1)
+            .is_some_and(|arg| arg == "--ohm-clippy-codegen-version")
+        {
+            if cfg!(ohm_clippy_codegen) {
+                return match writeln!(&mut anstream::stdout().lock(), "ohm-clippy-codegen-v1") {
+                    Ok(()) => ExitCode::SUCCESS,
+                    Err(_) => ExitCode::FAILURE,
+                };
+            }
+            eprintln!("this Clippy driver does not support ordinary code generation with lints");
+            return ExitCode::FAILURE;
+        }
+
         if orig_args.iter().any(|a| a == "--version" || a == "-V") {
             let version_info = rustc_tools_util::get_version_info!();
 
@@ -305,6 +338,18 @@ fn main() -> ExitCode {
         let mut args: Vec<String> = orig_args.clone();
         pass_sysroot_env_if_given(&mut args, sys_root_env);
 
+        let codegen = match env::var("CLIPPY_CODEGEN").as_deref() {
+            Err(env::VarError::NotPresent) | Ok("") | Ok("0") => false,
+            Ok("1") if cfg!(ohm_clippy_codegen) => true,
+            Ok("1") => {
+                eprintln!("CLIPPY_CODEGEN requires an Ohm compiler with independent lint MIR");
+                return ExitCode::FAILURE;
+            },
+            _ => {
+                eprintln!("CLIPPY_CODEGEN must be 0 or 1");
+                return ExitCode::FAILURE;
+            },
+        };
         let mut no_deps = false;
         let clippy_args_var = env::var("CLIPPY_ARGS").ok();
         let clippy_args = clippy_args_var
@@ -319,7 +364,12 @@ fn main() -> ExitCode {
                 },
                 _ => Some(s.to_string()),
             })
-            .chain(vec!["--cfg".into(), "clippy".into()])
+            .chain(
+                (!codegen)
+                    .then_some(["--cfg".into(), "clippy".into()])
+                    .into_iter()
+                    .flatten(),
+            )
             .collect::<Vec<String>>();
 
         // If no Clippy lints will be run we do not need to run Clippy
@@ -337,7 +387,13 @@ fn main() -> ExitCode {
         let clippy_enabled = !cap_lints_allow && relevant_package && !info_query;
         if clippy_enabled {
             args.extend(clippy_args);
-            rustc_driver::run_compiler(&args, &mut ClippyCallbacks { clippy_args_var });
+            rustc_driver::run_compiler(
+                &args,
+                &mut ClippyCallbacks {
+                    clippy_args_var,
+                    codegen,
+                },
+            );
         } else {
             rustc_driver::run_compiler(&args, &mut RustcCallbacks { clippy_args_var });
         }

@@ -80,7 +80,7 @@ impl<'tcx> LateLintPass<'tcx> for RedundantClone {
             return;
         }
 
-        let mir = cx.tcx.optimized_mir(def_id.to_def_id());
+        let mir = clippy_utils::mir::mir_for_lint(cx.tcx, def_id);
 
         let mut possible_borrower = None;
 

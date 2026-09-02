@@ -152,7 +152,7 @@ impl<'tcx> LateLintPass<'tcx> for LargeStackFrames {
             return;
         }
 
-        let mir = cx.tcx.optimized_mir(def_id);
+        let mir = clippy_utils::mir::mir_for_lint(cx.tcx, local_def_id);
         let typing_env = mir.typing_env(cx.tcx);
 
         let sizes_of_locals = mir

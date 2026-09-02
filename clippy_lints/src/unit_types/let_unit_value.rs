@@ -201,9 +201,7 @@ impl<'tcx> Visitor<'tcx> for UnitVariableCollector<'_, 'tcx> {
             && id == self.id
         {
             if let Some(macro_call) = self.macro_call
-                && macro_call.arguments.all_args().iter().any(|arg| {
-                    matches!(arg.kind, FormatArgumentKind::Captured(_)) && find_format_arg_expr(ex, arg).is_some()
-                })
+                && is_format_capture(macro_call, ex)
             {
                 self.spans.push(VariableUsage::FormatCapture);
             } else {
@@ -221,6 +219,17 @@ impl<'tcx> Visitor<'tcx> for UnitVariableCollector<'_, 'tcx> {
 
         walk_expr(self, ex);
     }
+}
+
+/// Captures in nested format_args! remain captures after their HIR is flattened into the parent.
+fn is_format_capture(format_args: &FormatArgs, expr: &Expr<'_>) -> bool {
+    format_args.arguments.all_args().iter().any(|arg| {
+        (matches!(arg.kind, FormatArgumentKind::Captured(_)) && find_format_arg_expr(expr, arg).is_some())
+            || match &arg.expr.peel_parens_and_refs().kind {
+                rustc_ast::ExprKind::FormatArgs(nested) => is_format_capture(nested, expr),
+                _ => false,
+            }
+    })
 }
 
 /// Checks sub-expressions which create the value returned by the given expression for whether

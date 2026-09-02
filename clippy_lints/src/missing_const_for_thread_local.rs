@@ -88,10 +88,10 @@ fn is_unreachable(cx: &LateContext<'_>, expr: &Expr<'_>) -> bool {
 }
 
 #[inline]
-fn initializer_can_be_made_const(cx: &LateContext<'_>, defid: rustc_span::def_id::DefId, msrv: Msrv) -> bool {
+fn initializer_can_be_made_const(cx: &LateContext<'_>, defid: rustc_span::def_id::LocalDefId, msrv: Msrv) -> bool {
     // Building MIR for `fn`s with unsatisfiable preds results in ICE.
-    if !fn_has_unsatisfiable_preds(cx, defid)
-        && let mir = cx.tcx.optimized_mir(defid)
+    if !fn_has_unsatisfiable_preds(cx, defid.to_def_id())
+        && let mir = clippy_utils::mir::mir_for_lint(cx.tcx, defid)
         && let Ok(()) = is_min_const_fn(cx, mir, msrv)
     {
         return true;
@@ -127,7 +127,7 @@ impl<'tcx> LateLintPass<'tcx> for MissingConstForThreadLocal {
             // https://github.com/rust-lang/rust-clippy/issues/12637
             // we ensure that this is reachable before we check in mir
             && !is_unreachable(cx, ret_expr)
-            && initializer_can_be_made_const(cx, defid, self.msrv)
+            && initializer_can_be_made_const(cx, local_defid, self.msrv)
             // we know that the function is const-qualifiable, so now
             // we need only to get the initializer expression to span-lint it.
             && let initializer_snippet = snippet(cx, ret_expr.span, "thread_local! { ... }")
