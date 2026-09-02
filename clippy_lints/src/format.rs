@@ -101,6 +101,20 @@ impl<'tcx> LateLintPass<'tcx> for UselessFormat {
                             format!("{}.to_string()", sugg.maybe_paren())
                         };
                         span_useless_format(cx, call_site, sugg, applicability);
+                    } else if cx.tcx.sess.opts.unstable_opts.flatten_format_args
+                        && let FormatArgsPiece::Placeholder(placeholder) = piece
+                        && placeholder.format_trait == FormatTrait::Display
+                        && placeholder.format_options == FormatOptions::default()
+                        && let rustc_ast::ExprKind::Lit(lit) = arg.expr.peel_parens_and_refs().kind
+                        && matches!(rustc_ast::LitKind::from_token_lit(lit), Ok(rustc_ast::LitKind::Str(..)))
+                    {
+                        let sugg = Sugg::ast(cx, &arg.expr, "<arg>", call_site.ctxt(), &mut applicability);
+                        span_useless_format(
+                            cx,
+                            call_site,
+                            format!("{}.to_string()", sugg.maybe_paren()),
+                            applicability,
+                        );
                     }
                 },
                 _ => {},

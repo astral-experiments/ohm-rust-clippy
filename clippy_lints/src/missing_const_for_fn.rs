@@ -157,7 +157,7 @@ impl<'tcx> LateLintPass<'tcx> for MissingConstForFn {
             return;
         }
 
-        let mir = cx.tcx.optimized_mir(def_id);
+        let mir = clippy_utils::mir::mir_for_lint(cx.tcx, def_id);
 
         if let Ok(()) = is_min_const_fn(cx, mir, self.msrv)
             && let node = cx.tcx.hir_node_by_def_id(def_id)
