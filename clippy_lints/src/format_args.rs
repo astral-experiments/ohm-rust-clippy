@@ -503,7 +503,7 @@ impl<'tcx> FormatArgsExpr<'_, 'tcx> {
         }
     }
 
-    /// Formatting lowering removes literal arguments and absorbs nested format_args! calls.
+    /// Formatting lowering removes literal arguments and absorbs nested `format_args!` calls.
     /// Their syntax still determines these lints without requiring a surviving HIR expression.
     fn check_lowered_argument(&self, placeholder: &FormatPlaceholder, arg: &rustc_ast::Expr) {
         if !self.cx.tcx.sess.opts.unstable_opts.flatten_format_args {

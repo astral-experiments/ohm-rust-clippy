@@ -104,11 +104,11 @@ fn track_clippy_args(sess: &Session, args_env_var: Option<&str>) {
         .borrow_mut()
         .insert((sym::CLIPPY_ARGS, args_env_var.map(Symbol::intern)));
     sess.env_depinfo.borrow_mut().insert((
-        Symbol::intern("CLIPPY_CODEGEN"),
+        sym::CLIPPY_CODEGEN,
         env::var("CLIPPY_CODEGEN").ok().map(|value| Symbol::intern(&value)),
     ));
     sess.env_depinfo.borrow_mut().insert((
-        Symbol::intern("CLIPPY_CODEGEN_CONFIG"),
+        sym::CLIPPY_CODEGEN_CONFIG,
         env::var("CLIPPY_CODEGEN_CONFIG")
             .ok()
             .map(|value| Symbol::intern(&value)),
@@ -245,6 +245,43 @@ fn display_help() -> ExitCode {
 
 const BUG_REPORT_URL: &str = "https://github.com/rust-lang/rust-clippy/issues/new?template=ice.yml";
 
+/// Reports whether this driver supports Clippy analysis during code generation.
+fn display_codegen_version() -> ExitCode {
+    if cfg!(ohm_clippy_codegen) {
+        return match writeln!(&mut anstream::stdout().lock(), "ohm-clippy-codegen-v1") {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(_) => ExitCode::FAILURE,
+        };
+    }
+    eprintln!("this Clippy driver does not support ordinary code generation with lints");
+    ExitCode::FAILURE
+}
+
+/// Validates the opt-in code-generation mode against this driver's capabilities.
+fn codegen_enabled() -> Result<bool, &'static str> {
+    match env::var("CLIPPY_CODEGEN").as_deref() {
+        Err(env::VarError::NotPresent) | Ok("" | "0") => Ok(false),
+        Ok("1") if cfg!(ohm_clippy_codegen) => Ok(true),
+        Ok("1") => Err("CLIPPY_CODEGEN requires an Ohm compiler with independent lint MIR"),
+        _ => Err("CLIPPY_CODEGEN must be 0 or 1"),
+    }
+}
+
+fn has_sysroot_arg(args: &[String]) -> bool {
+    // https://doc.rust-lang.org/rustc/command-line-arguments.html#path-load-command-line-flags-from-a-path
+    // Beside checking for existence of `--sysroot` on the command line, we need to
+    // check for the arg files that are prefixed with @ as well to be consistent with rustc
+    args.iter().any(|arg| {
+        if let Some(arg_file_path) = arg.strip_prefix('@')
+            && let Ok(arg_file) = read_to_string(arg_file_path)
+        {
+            arg_file.lines().any(|arg| is_arg(arg, "--sysroot"))
+        } else {
+            is_arg(arg, "--sysroot")
+        }
+    })
+}
+
 fn main() -> ExitCode {
     let early_dcx = EarlyDiagCtxt::new(ErrorOutputType::default());
 
@@ -259,21 +296,6 @@ fn main() -> ExitCode {
     });
 
     rustc_driver::catch_with_exit_code(move || {
-        fn has_sysroot_arg(args: &[String]) -> bool {
-            // https://doc.rust-lang.org/rustc/command-line-arguments.html#path-load-command-line-flags-from-a-path
-            // Beside checking for existence of `--sysroot` on the command line, we need to
-            // check for the arg files that are prefixed with @ as well to be consistent with rustc
-            args.iter().any(|arg| {
-                if let Some(arg_file_path) = arg.strip_prefix('@')
-                    && let Ok(arg_file) = read_to_string(arg_file_path)
-                {
-                    arg_file.lines().any(|arg| is_arg(arg, "--sysroot"))
-                } else {
-                    is_arg(arg, "--sysroot")
-                }
-            })
-        }
-
         let mut orig_args = rustc_driver::args::raw_args(&early_dcx);
 
         let sys_root_env = std::env::var("SYSROOT").ok();
@@ -303,14 +325,7 @@ fn main() -> ExitCode {
             .get(1)
             .is_some_and(|arg| arg == "--ohm-clippy-codegen-version")
         {
-            if cfg!(ohm_clippy_codegen) {
-                return match writeln!(&mut anstream::stdout().lock(), "ohm-clippy-codegen-v1") {
-                    Ok(()) => ExitCode::SUCCESS,
-                    Err(_) => ExitCode::FAILURE,
-                };
-            }
-            eprintln!("this Clippy driver does not support ordinary code generation with lints");
-            return ExitCode::FAILURE;
+            return display_codegen_version();
         }
 
         if orig_args.iter().any(|a| a == "--version" || a == "-V") {
@@ -338,15 +353,10 @@ fn main() -> ExitCode {
         let mut args: Vec<String> = orig_args.clone();
         pass_sysroot_env_if_given(&mut args, sys_root_env);
 
-        let codegen = match env::var("CLIPPY_CODEGEN").as_deref() {
-            Err(env::VarError::NotPresent) | Ok("") | Ok("0") => false,
-            Ok("1") if cfg!(ohm_clippy_codegen) => true,
-            Ok("1") => {
-                eprintln!("CLIPPY_CODEGEN requires an Ohm compiler with independent lint MIR");
-                return ExitCode::FAILURE;
-            },
-            _ => {
-                eprintln!("CLIPPY_CODEGEN must be 0 or 1");
+        let codegen = match codegen_enabled() {
+            Ok(codegen) => codegen,
+            Err(message) => {
+                eprintln!("{message}");
                 return ExitCode::FAILURE;
             },
         };

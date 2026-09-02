@@ -221,7 +221,7 @@ impl<'tcx> Visitor<'tcx> for UnitVariableCollector<'_, 'tcx> {
     }
 }
 
-/// Captures in nested format_args! remain captures after their HIR is flattened into the parent.
+/// Captures in nested `format_args!` remain captures after their HIR is flattened into the parent.
 fn is_format_capture(format_args: &FormatArgs, expr: &Expr<'_>) -> bool {
     format_args.arguments.all_args().iter().any(|arg| {
         (matches!(arg.kind, FormatArgumentKind::Captured(_)) && find_format_arg_expr(expr, arg).is_some())
