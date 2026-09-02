@@ -1,9 +1,11 @@
 //! Combined lint/codegen mode retains ordinary compiler semantics and standalone lint coverage.
 
+#[cfg(ohm_clippy_codegen)]
 use std::fs;
 use std::path::Path;
 use std::process::{Command, Output};
 
+#[cfg(ohm_clippy_codegen)]
 const LINTS: &[&str] = &[
     "redundant_clone",
     "missing_const_for_fn",
@@ -36,6 +38,7 @@ fn succeeded(command: &mut Command) -> Output {
     output
 }
 
+#[cfg(ohm_clippy_codegen)]
 fn diagnostics(output: &Output) -> Vec<String> {
     let mut diagnostics = String::from_utf8_lossy(&output.stderr)
         .lines()
