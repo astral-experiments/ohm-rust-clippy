@@ -3,7 +3,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [ohm-1.98.0]
+    branches: [ohm-1.98.1]
 
 permissions:
   contents: read
@@ -63,7 +63,7 @@ jobs:
           persist-credentials: false
 
       - name: Install the matching compiler
-        run: rustup toolchain install 1.98.0 --profile minimal --component rustc-dev --component llvm-tools --component rust-src
+        run: rustup toolchain install 1.98.1 --profile minimal --component rustc-dev --component llvm-tools --component rust-src
 
       - name: Cache Cargo artifacts
         uses: Swatinem/rust-cache@v2
