@@ -143,7 +143,7 @@ enum DevCommand {
     /// Updates lint registration and information from the source code
     ///
     /// Makes sure that: {n}
-    /// * the lint count in README.md is correct {n}
+    /// * the lint count in book/src/README.md is correct {n}
     /// * the changelog contains markdown link references at the bottom {n}
     /// * all lint groups include the correct lints {n}
     /// * lint modules in `clippy_lints/*` are visible in `src/lib.rs` via `pub mod` {n}
