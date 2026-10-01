@@ -62,6 +62,12 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Select a compatible Apple linker
+        if: runner.os == 'macOS'
+        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
+        with:
+          xcode-version: '>=26'
+
       - name: Install the matching compiler
         run: rustup toolchain install 1.99.0 --profile minimal --component rustc-dev --component llvm-tools --component rust-src
 
