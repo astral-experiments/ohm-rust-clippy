@@ -51,7 +51,7 @@ jobs:
           - name: Tests
             runner: depot-ubuntu-24.04-16
           - name: Tests (macOS)
-            runner: namespace-profile-macos-15
+            runner: macos-26
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
       NO_FMT_TEST: 1
