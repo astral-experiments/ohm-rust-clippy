@@ -3,7 +3,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [ohm-1.98.1]
+    branches: [ohm-1.99.0]
 
 permissions:
   contents: read
@@ -22,7 +22,7 @@ jobs:
     name: Formatting and lint registration
     runs-on: depot-ubuntu-24.04-4
     env:
-      RUSTUP_TOOLCHAIN: nightly-2026-06-25
+      RUSTUP_TOOLCHAIN: nightly-2026-08-07
     steps:
       - name: Check out the repository
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -30,7 +30,7 @@ jobs:
           persist-credentials: false
 
       - name: Install the nightly formatter
-        run: rustup toolchain install nightly-2026-06-25 --profile minimal --component rustfmt --component rustc-dev --component llvm-tools
+        run: rustup toolchain install nightly-2026-08-07 --profile minimal --component rustfmt --component rustc-dev --component llvm-tools
 
       - name: Cache Cargo artifacts
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
@@ -63,7 +63,7 @@ jobs:
           persist-credentials: false
 
       - name: Install the matching compiler
-        run: rustup toolchain install 1.98.1 --profile minimal --component rustc-dev --component llvm-tools --component rust-src
+        run: rustup toolchain install 1.99.0 --profile minimal --component rustc-dev --component llvm-tools --component rust-src
 
       - name: Cache Cargo artifacts
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
