@@ -1,7 +1,6 @@
 use clippy_utils::diagnostics::{span_lint_hir, span_lint_hir_and_then};
 use clippy_utils::mir::{LocalUsage, PossibleBorrowerMap, visit_local_usage};
 use clippy_utils::res::MaybeDef as _;
-use clippy_utils::source::SpanExt as _;
 use clippy_utils::ty::{has_drop, is_copy, peel_and_count_ty_refs};
 use clippy_utils::visitors::for_each_expr_without_closures;
 use clippy_utils::{fn_has_unsatisfiable_clauses, sym};
@@ -227,7 +226,7 @@ impl<'tcx> LateLintPass<'tcx> for RedundantClone {
                 .unwrap_crate_local()
                 .lint_root;
 
-            if let Some(snip) = span.get_text(cx)
+            if let Some(snip) = clippy_utils::source::tracked_text(cx, span)
                 && let Some(dot) = snip.rfind('.')
             {
                 let sugg_span = span.with_lo(span.lo() + BytePos(u32::try_from(dot).unwrap()));
