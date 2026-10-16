@@ -3,17 +3,19 @@ use clippy_utils::mir::{LocalUsage, PossibleBorrowerMap, visit_local_usage};
 use clippy_utils::res::MaybeDef as _;
 use clippy_utils::source::SpanExt as _;
 use clippy_utils::ty::{has_drop, is_copy, peel_and_count_ty_refs};
+use clippy_utils::visitors::for_each_expr_without_closures;
 use clippy_utils::{fn_has_unsatisfiable_clauses, sym};
 use rustc_errors::Applicability;
 use rustc_hir::attrs::lang_items::LangItem;
 use rustc_hir::intravisit::FnKind;
-use rustc_hir::{Body, FnDecl, def_id};
+use rustc_hir::{Body, ExprKind, FnDecl, def_id};
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_middle::mir;
 use rustc_middle::ty::{self, Ty};
 use rustc_session::declare_lint_pass;
 use rustc_span::def_id::LocalDefId;
 use rustc_span::{BytePos, Span};
+use std::ops::ControlFlow;
 
 macro_rules! unwrap_or_continue {
     ($x:expr) => {
@@ -70,18 +72,19 @@ impl<'tcx> LateLintPass<'tcx> for RedundantClone {
         cx: &LateContext<'tcx>,
         _: FnKind<'tcx>,
         _: &'tcx FnDecl<'_>,
-        _: &'tcx Body<'_>,
+        body: &'tcx Body<'_>,
         _: Span,
         def_id: LocalDefId,
     ) {
+        // Closures receive their own `check_fn` callback and are checked separately.
         // Building MIR for `fn`s with unsatisfiable clauses results in ICE.
-        if fn_has_unsatisfiable_clauses(cx, def_id.to_def_id()) {
+        if !contains_clone_like_call(body) || fn_has_unsatisfiable_clauses(cx, def_id.to_def_id()) {
             return;
         }
 
         let mir = cx.tcx.optimized_mir(def_id.to_def_id());
 
-        let mut possible_borrower = PossibleBorrowerMap::new(cx, mir);
+        let mut possible_borrower = None;
 
         for (bb, bbdata) in mir.basic_blocks.iter_enumerated() {
             let terminator = bbdata.terminator();
@@ -129,7 +132,11 @@ impl<'tcx> LateLintPass<'tcx> for RedundantClone {
                 // `res = clone(arg)` can be turned into `res = move arg;`
                 // if `arg` is the only borrow of `cloned` at this point.
 
-                if cannot_move_out || !possible_borrower.only_borrowers(&[arg], cloned, loc) {
+                if cannot_move_out
+                    || !possible_borrower
+                        .get_or_insert_with(|| PossibleBorrowerMap::new(cx, mir))
+                        .only_borrowers(&[arg], cloned, loc)
+                {
                     continue;
                 }
 
@@ -175,13 +182,18 @@ impl<'tcx> LateLintPass<'tcx> for RedundantClone {
                 // StorageDead(pred_arg);
                 // res = to_path_buf(cloned);
                 // ```
-                if cannot_move_out || !possible_borrower.only_borrowers(&[arg, cloned], local, loc) {
+                if cannot_move_out
+                    || !possible_borrower
+                        .get_or_insert_with(|| PossibleBorrowerMap::new(cx, mir))
+                        .only_borrowers(&[arg, cloned], local, loc)
+                {
                     continue;
                 }
 
                 (local, deref_clone_ret)
             };
 
+            let possible_borrower = possible_borrower.get_or_insert_with(|| PossibleBorrowerMap::new(cx, mir));
             let clone_usage = if local == ret_local {
                 CloneUsage {
                     cloned_use_loc: None.into(),
@@ -248,6 +260,23 @@ impl<'tcx> LateLintPass<'tcx> for RedundantClone {
             }
         }
     }
+}
+
+fn contains_clone_like_call(body: &Body<'_>) -> bool {
+    for_each_expr_without_closures(body, |expr| {
+        if let ExprKind::MethodCall(method, receiver, ..) = expr.kind
+            && !matches!(receiver.kind, ExprKind::Lit(_))
+            && matches!(
+                method.ident.name,
+                sym::clone | sym::to_owned | sym::to_string | sym::to_path_buf | sym::to_os_string
+            )
+        {
+            ControlFlow::Break(())
+        } else {
+            ControlFlow::Continue(())
+        }
+    })
+    .is_some()
 }
 
 /// If `kind` is `y = func(x: &T)` where `T: !Copy`, returns `(DefId of func, x, T, y)`.
