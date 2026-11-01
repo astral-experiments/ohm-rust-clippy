@@ -4,6 +4,53 @@ use test_utils::{CARGO_CLIPPY_PATH, IS_RUSTC_TEST_SUITE};
 
 mod test_utils;
 
+#[test]
+fn clippy_rechecks_changed_argument_files() {
+    if IS_RUSTC_TEST_SUITE {
+        return;
+    }
+    let project = tempfile::tempdir().unwrap();
+    let root = project.path();
+    std::fs::create_dir(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("Cargo.toml"),
+        "[package]\nname = \"argfile\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("src/lib.rs"), "pub fn answer() -> u8 { return 7; }").unwrap();
+    // Cargo starts with deny, then the build script selects allow for this compilation.
+    std::fs::write(
+        root.join("build.rs"),
+        r#"fn main() {
+    println!("cargo:rerun-if-changed=build.rs");
+    std::fs::write("lint.flags", "-Aclippy::needless_return\n").unwrap();
+}"#,
+    )
+    .unwrap();
+    let run = || {
+        Command::new(&*CARGO_CLIPPY_PATH)
+            .current_dir(root)
+            .env("CARGO_TARGET_DIR", root.join("target"))
+            .args(["clippy", "--offline", "--lib", "--", "@lint.flags"])
+            .output()
+            .unwrap()
+    };
+    std::fs::write(root.join("lint.flags"), "-Dclippy::needless_return\n").unwrap();
+    let original_mtime = std::fs::metadata(root.join("lint.flags")).unwrap().modified().unwrap();
+    let initial = run();
+    assert!(initial.status.success(), "{}", String::from_utf8_lossy(&initial.stderr));
+    std::fs::write(root.join("lint.flags"), "-Dclippy::needless_return\n").unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(root.join("lint.flags"))
+        .unwrap()
+        .set_modified(original_mtime)
+        .unwrap();
+    let changed = run();
+    assert!(!changed.status.success());
+    assert!(String::from_utf8_lossy(&changed.stderr).contains("needless_return"));
+}
+
 #[cfg(unix)]
 #[test]
 fn non_unicode_argument_is_reported() {

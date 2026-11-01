@@ -17,6 +17,8 @@ extern crate rustc_interface;
 extern crate rustc_session;
 extern crate rustc_span;
 
+mod argfile;
+
 // Override the C allocator in the same way that the `rustc` binary would do.
 rustc_driver::override_c_allocator_in_binary!();
 
@@ -119,13 +121,15 @@ fn track_clippy_args(sess: &Session, args_env_var: Option<&str>) {
 fn track_files(sess: &Session) {
     let mut file_depinfo = sess.file_depinfo.borrow_mut();
 
-    // Used by `clippy::cargo` lints and to determine the MSRV. `cargo clippy` executes `clippy-driver`
-    // with the current directory set to `CARGO_MANIFEST_DIR` so a relative path is fine
+    // Used by `clippy::cargo` lints and to determine the MSRV. `cargo clippy` executes
+    // `clippy-driver` with the current directory set to `CARGO_MANIFEST_DIR` so a relative path is
+    // fine
     if Path::new("Cargo.toml").exists() {
         file_depinfo.insert(sym::Cargo_toml);
     }
 
-    // `clippy.toml` will be automatically tracked as it's loaded with `sess.source_map().load_file()`
+    // `clippy.toml` will be automatically tracked as it's loaded with
+    // `sess.source_map().load_file()`
 
     // A changed driver must rerun Clippy even when source and the reported version are unchanged.
     // This is required for incremental lint queries in release builds as well as development.
@@ -157,6 +161,7 @@ impl rustc_driver::Callbacks for RustcCallbacks {
 
 struct ClippyCallbacks {
     clippy_args_var: Option<String>,
+    argfile_fingerprint: Option<String>,
 }
 
 impl rustc_driver::Callbacks for ClippyCallbacks {
@@ -168,6 +173,7 @@ impl rustc_driver::Callbacks for ClippyCallbacks {
                 let _ = tcx.source_file_hash(id);
             }
         });
+        let argfile_fingerprint = self.argfile_fingerprint.take();
         let previous = config.register_lints.take();
         let clippy_args_var = self.clippy_args_var.take();
         #[cfg(ohm_incremental_driver_hash)]
@@ -178,6 +184,11 @@ impl rustc_driver::Callbacks for ClippyCallbacks {
         let incremental_lints = false;
         config.track_state = Some(Box::new(move |sess| {
             track_clippy_args(sess, clippy_args_var.as_deref());
+            if let Some(fingerprint) = &argfile_fingerprint {
+                sess.env_depinfo
+                    .borrow_mut()
+                    .insert((Symbol::intern(argfile::ENV), Some(Symbol::intern(fingerprint))));
+            }
             track_files(sess);
 
             sess.env_depinfo.borrow_mut().insert((
@@ -284,8 +295,8 @@ fn main() -> ExitCode {
         };
 
         // make "clippy-driver --rustc" work like a subcommand that passes further args to "rustc"
-        // for example `clippy-driver --rustc --version` will print the rustc version that clippy-driver
-        // uses
+        // for example `clippy-driver --rustc --version` will print the rustc version that
+        // clippy-driver uses
         if let Some(pos) = orig_args.iter().position(|arg| arg == "--rustc") {
             orig_args.remove(pos);
             orig_args[0] = "rustc".to_string();
@@ -343,8 +354,23 @@ fn main() -> ExitCode {
 
         let clippy_enabled = !cap_lints_allow && relevant_package && !info_query;
         if clippy_enabled {
+            let argfiles: Vec<_> = clippy_args.iter().filter_map(|arg| arg.strip_prefix('@')).collect();
+            // A dependency may create or replace a response file after the frontend starts.
+            // Record the compiler's inputs. A stream can only be consumed by rustc itself.
+            let argfile_fingerprint = (!argfiles.is_empty()).then(|| {
+                env::current_dir()
+                    .ok()
+                    .and_then(|root| argfile::fingerprint(&root, &argfiles))
+                    .unwrap_or_else(|| "volatile".into())
+            });
             args.extend(clippy_args);
-            rustc_driver::run_compiler(&args, &mut ClippyCallbacks { clippy_args_var });
+            rustc_driver::run_compiler(
+                &args,
+                &mut ClippyCallbacks {
+                    clippy_args_var,
+                    argfile_fingerprint,
+                },
+            );
         } else {
             rustc_driver::run_compiler(&args, &mut RustcCallbacks { clippy_args_var });
         }
