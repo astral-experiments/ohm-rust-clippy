@@ -25,20 +25,33 @@ fn show_version() {
 }
 
 pub fn main() {
+    let args: Vec<_> = env::args_os()
+        .skip(1)
+        .map(|arg| {
+            arg.into_string().unwrap_or_else(|arg| {
+                eprintln!(
+                    "error: invalid UTF-8 in command-line argument: {}",
+                    arg.as_encoded_bytes().escape_ascii()
+                );
+                process::exit(1);
+            })
+        })
+        .collect();
+
     // Check for version and help flags even when invoked as 'cargo-clippy'
-    if env::args().any(|a| a == "--help" || a == "-h") {
+    if args.iter().any(|a| a == "--help" || a == "-h") {
         show_help();
         return;
     }
 
-    if env::args().any(|a| a == "--version" || a == "-V") {
+    if args.iter().any(|a| a == "--version" || a == "-V") {
         show_version();
         return;
     }
 
-    if let Some(pos) = env::args().position(|a| a == "--explain") {
-        if let Some(mut lint) = env::args().nth(pos + 1) {
-            lint.make_ascii_lowercase();
+    if let Some(pos) = args.iter().position(|a| a == "--explain") {
+        if let Some(lint) = args.get(pos + 1) {
+            let lint = lint.to_ascii_lowercase();
             process::exit(clippy_lints::explain(
                 &lint.strip_prefix("clippy::").unwrap_or(&lint).replace('-', "_"),
             ));
@@ -47,7 +60,7 @@ pub fn main() {
         return;
     }
 
-    if let Err(code) = process(env::args().skip(2)) {
+    if let Err(code) = process(args.into_iter().skip(1)) {
         process::exit(code);
     }
 }
