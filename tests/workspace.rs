@@ -143,3 +143,48 @@ fn test_no_deps_ignores_path_deps_in_workspaces() {
     // Make sure Cargo is aware of the new `--cfg` flag.
     lint_path_dep();
 }
+
+#[test]
+fn clippy_preserves_compiler_arguments() {
+    if IS_RUSTC_TEST_SUITE {
+        return;
+    }
+    let project = tempfile::tempdir().unwrap();
+    let root = project.path();
+    std::fs::write(
+        root.join("Cargo.toml"),
+        "[package]\nname = 'clippy-args'\nversion = '0.1.0'\nedition = '2024'\n[lib]\npath = 'lib.rs'\n[workspace]\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("lib.rs"),
+        r#"#![allow(unexpected_cfgs)]
+#[cfg(not(payload = "left__CLIPPY_HACKERY__right"))]
+compile_error!("lost compiler argument");
+"#,
+    )
+    .unwrap();
+    let run = |extra: &[&str]| {
+        Command::new(&*CARGO_CLIPPY_PATH)
+            .current_dir(root)
+            .env("CARGO_TARGET_DIR", root.join("target"))
+            .args([
+                "clippy",
+                "--offline",
+                "--",
+                "--cfg",
+                r#"payload="left__CLIPPY_HACKERY__right""#,
+            ])
+            .args(extra)
+            .output()
+            .unwrap()
+    };
+    let control = run(&[]);
+    assert!(control.status.success(), "{}", String::from_utf8_lossy(&control.stderr));
+    let empty = run(&[""]);
+    let stderr = String::from_utf8_lossy(&empty.stderr);
+    assert!(
+        !empty.status.success() && stderr.contains("multiple input filenames"),
+        "{stderr}"
+    );
+}
