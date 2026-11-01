@@ -190,7 +190,22 @@ where
 {
     let cmd = ClippyCmd::new(old_args);
 
+    // The first compiler runs after build scripts. Keep its streamed arguments
+    // available until Cargo has verified the suggestions it applied.
+    let replay = if cmd.cargo_subcommand == "fix" && cmd.clippy_args.iter().any(|arg| arg.starts_with('@')) {
+        Some(tempfile::tempdir().map_err(|error| {
+            eprintln!("error: could not create Clippy argument-file directory: {error}");
+            1
+        })?)
+    } else {
+        None
+    };
     let mut cmd = cmd.into_std_cmd();
+    if let Some(dir) = &replay {
+        cmd.env(argfile::FIX_DIR, dir.path());
+    } else {
+        cmd.env_remove(argfile::FIX_DIR);
+    }
 
     let exit_status = cmd
         .spawn()

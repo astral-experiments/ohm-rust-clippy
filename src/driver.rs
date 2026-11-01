@@ -18,6 +18,7 @@ extern crate rustc_session;
 extern crate rustc_span;
 
 mod argfile;
+mod fix_argfiles;
 
 // Override the C allocator in the same way that the `rustc` binary would do.
 rustc_driver::override_c_allocator_in_binary!();
@@ -364,6 +365,13 @@ fn main() -> ExitCode {
                     .unwrap_or_else(|| "volatile".into())
             });
             args.extend(clippy_args);
+            let mut replay_handles = Vec::new();
+            if let Some(dir) = env::var_os(argfile::FIX_DIR)
+                && let Err(error) = fix_argfiles::prepare(Path::new(&dir), &mut args, &mut replay_handles)
+            {
+                eprintln!("error: could not replay Clippy argument file: {error}");
+                return ExitCode::FAILURE;
+            }
             rustc_driver::run_compiler(
                 &args,
                 &mut ClippyCallbacks {
