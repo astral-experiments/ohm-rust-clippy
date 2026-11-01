@@ -6,9 +6,11 @@
 
 extern crate rustc_driver;
 
+mod argfile;
+
 use std::env;
 use std::io::Write as _;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{self, Command, exit};
 
 fn show_help() {
@@ -137,6 +139,22 @@ impl ClippyCmd {
                 .fold(String::new(), |s, arg| s + arg + SEPARATOR)
         };
 
+        let argfiles: Vec<_> = self
+            .clippy_args
+            .iter()
+            .filter_map(|arg| arg.strip_prefix('@'))
+            .collect();
+        if !argfiles.is_empty() {
+            let absolute = argfiles.iter().all(|path| Path::new(path).is_absolute());
+            let root = if absolute {
+                Some(PathBuf::new())
+            } else {
+                argfile_root(&cmd, &self.args)
+            };
+            let fingerprint = root.as_deref().and_then(|root| argfile::fingerprint(root, &argfiles));
+            cmd.env(argfile::ENV, fingerprint.unwrap_or_default());
+        }
+
         cmd.env("RUSTC_WORKSPACE_WRAPPER", Self::path())
             .env("CLIPPY_ARGS", clippy_args)
             .arg(self.cargo_subcommand)
@@ -144,6 +162,26 @@ impl ClippyCmd {
 
         cmd
     }
+}
+
+/// Cargo normally launches the compiler at the workspace root, even from a member's subdirectory.
+fn argfile_root(cargo: &Command, args: &[String]) -> Option<PathBuf> {
+    let mut locate = Command::new(cargo.get_program());
+    locate.args(["locate-project", "--workspace", "--message-format", "plain"]);
+    let mut args = args.iter();
+    while let Some(arg) = args.next() {
+        if arg == "--manifest-path" {
+            locate.arg(arg).arg(args.next()?);
+        } else if arg.starts_with("--manifest-path=") {
+            locate.arg(arg);
+        }
+    }
+    let output = locate.output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let manifest = std::str::from_utf8(&output.stdout).ok()?.trim_end();
+    Some(Path::new(manifest).parent()?.to_owned())
 }
 
 fn process<I>(old_args: I) -> Result<(), i32>
