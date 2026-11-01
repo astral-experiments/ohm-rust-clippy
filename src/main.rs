@@ -109,11 +109,20 @@ impl ClippyCmd {
     }
 
     fn into_std_cmd(self) -> Command {
+        const SEPARATOR: &str = "__CLIPPY_HACKERY__";
         let mut cmd = Command::new(env::var("CARGO").unwrap_or_else(|_| "cargo".into()));
-        let clippy_args: String = self
+        // Keep the existing CLIPPY_ARGS representation when it can encode every argument.
+        let clippy_args = if self
             .clippy_args
             .iter()
-            .fold(String::new(), |s, arg| s + arg + "__CLIPPY_HACKERY__");
+            .any(|arg| arg.is_empty() || arg.contains(SEPARATOR))
+        {
+            serde_json::to_string(&self.clippy_args).expect("serializing string arguments cannot fail")
+        } else {
+            self.clippy_args
+                .iter()
+                .fold(String::new(), |s, arg| s + arg + SEPARATOR)
+        };
 
         cmd.env("RUSTC_WORKSPACE_WRAPPER", Self::path())
             .env("CLIPPY_ARGS", clippy_args)

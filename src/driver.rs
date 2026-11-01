@@ -94,6 +94,20 @@ fn test_has_arg() {
     );
 }
 
+/// Decode arguments sent by cargo-clippy, including the original separator-delimited format.
+fn decode_clippy_args(encoded: &str) -> Vec<String> {
+    if encoded.starts_with('[')
+        && let Ok(args) = serde_json::from_str(encoded)
+    {
+        return args;
+    }
+    encoded
+        .split("__CLIPPY_HACKERY__")
+        .filter(|arg| !arg.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
 fn track_clippy_args(sess: &Session, args_env_var: Option<&str>) {
     sess.env_depinfo
         .borrow_mut()
@@ -308,22 +322,12 @@ fn main() -> ExitCode {
         let mut args: Vec<String> = orig_args.clone();
         pass_sysroot_env_if_given(&mut args, sys_root_env);
 
-        let mut no_deps = false;
         let clippy_args_var = env::var("CLIPPY_ARGS").ok();
-        let clippy_args = clippy_args_var
-            .as_deref()
-            .unwrap_or_default()
-            .split("__CLIPPY_HACKERY__")
-            .filter_map(|s| match s {
-                "" => None,
-                "--no-deps" => {
-                    no_deps = true;
-                    None
-                },
-                _ => Some(s.to_string()),
-            })
-            .chain(vec!["--cfg".into(), "clippy".into()])
-            .collect::<Vec<String>>();
+        let mut clippy_args = decode_clippy_args(clippy_args_var.as_deref().unwrap_or_default());
+        let original_len = clippy_args.len();
+        clippy_args.retain(|arg| arg != "--no-deps");
+        let no_deps = clippy_args.len() != original_len;
+        clippy_args.extend(["--cfg".into(), "clippy".into()]);
 
         // If no Clippy lints will be run we do not need to run Clippy
         let cap_lints_allow = arg_value(&orig_args, "--cap-lints", |val| val == "allow")
