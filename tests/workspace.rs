@@ -4,6 +4,33 @@ use test_utils::{CARGO_CLIPPY_PATH, IS_RUSTC_TEST_SUITE};
 
 mod test_utils;
 
+#[cfg(unix)]
+#[test]
+fn sysroot_in_piped_compiler_arguments() {
+    use std::io::Write as _;
+    use std::process::Stdio;
+
+    if IS_RUSTC_TEST_SUITE {
+        return;
+    }
+    let mut driver = Command::new(env!("CARGO_BIN_EXE_clippy-driver"))
+        .env("SYSROOT", "/fallback")
+        .arg("@/dev/stdin")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    driver
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"--sysroot=/explicit\n--print=sysroot\n")
+        .unwrap();
+    let output = driver.wait_with_output().unwrap();
+    assert!(output.status.success());
+    assert_eq!(String::from_utf8(output.stdout).unwrap().trim(), "/explicit");
+}
+
 #[test]
 fn clippy_rechecks_changed_argument_files() {
     if IS_RUSTC_TEST_SUITE {
