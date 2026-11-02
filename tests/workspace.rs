@@ -252,4 +252,12 @@ compile_error!("lost compiler argument");
         !empty.status.success() && stderr.contains("multiple input filenames"),
         "{stderr}"
     );
+
+    std::fs::write(root.join("lib.rs"), "const BAD: u8 = false;").unwrap();
+    for path in ["--help", "--version", "--explain"] {
+        std::fs::create_dir(root.join(path)).unwrap();
+        let output = run(&["-L", path]);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success() && stderr.contains("E0308"), "{path}: {stderr}");
+    }
 }
