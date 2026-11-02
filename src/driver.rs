@@ -32,7 +32,6 @@ use rustc_session::{EarlyDiagCtxt, Session};
 use rustc_span::symbol::Symbol;
 
 use std::env;
-use std::fs::read_to_string;
 use std::io::Write as _;
 use std::path::Path;
 use std::process::ExitCode;
@@ -269,10 +268,7 @@ fn driver_command(args: &[String]) -> Option<DriverCommand> {
     let end = args
         .iter()
         .rposition(|arg| matches!(arg.as_str(), "--rustc" | "--version" | "-V" | "--help" | "-h"))?;
-    let mut options = Options::new();
-    for option in rustc_session::config::rustc_optgroups() {
-        option.apply(&mut options);
-    }
+    let options = compiler_options();
 
     let mut command = None;
     let mut args = args[..=end].iter().enumerate();
@@ -291,6 +287,49 @@ fn driver_command(args: &[String]) -> Option<DriverCommand> {
     command
 }
 
+/// Build the same option table rustc uses to distinguish flags from their operands.
+fn compiler_options() -> Options {
+    let mut options = Options::new();
+    for option in rustc_session::config::rustc_optgroups() {
+        option.apply(&mut options);
+    }
+    options
+}
+
+/// Recognize an explicit sysroot without mistaking an option value or input for the flag.
+fn has_sysroot(args: &[String]) -> bool {
+    args.iter().any(|arg| is_arg(arg, "--sysroot"))
+        && compiler_options()
+            .parse(args)
+            .is_ok_and(|matches| matches.opt_present("sysroot"))
+}
+
+/// Apply the fallback sysroot after resolving compiler arguments, including streams.
+fn run_compiler(
+    early_dcx: &EarlyDiagCtxt,
+    args: &mut Vec<String>,
+    callbacks: &mut (dyn rustc_driver::Callbacks + Send),
+) -> ExitCode {
+    let mut copies = Vec::new();
+    let mut handles = Vec::new();
+    if let Ok(sysroot) = env::var("SYSROOT") {
+        let explicit = if args[1..].iter().any(|arg| arg.starts_with('@')) {
+            if let Err(error) = fix_argfiles::snapshot(args, &mut handles, &mut copies) {
+                eprintln!("error: failed to load argument file: {error}");
+                return ExitCode::FAILURE;
+            }
+            has_sysroot(&rustc_driver::args::arg_expand_all(early_dcx, &args[1..]))
+        } else {
+            has_sysroot(&args[1..])
+        };
+        if !explicit {
+            args.splice(1..1, ["--sysroot".into(), sysroot]);
+        }
+    }
+    rustc_driver::run_compiler(args, callbacks);
+    ExitCode::SUCCESS
+}
+
 fn main() -> ExitCode {
     let early_dcx = EarlyDiagCtxt::new(ErrorOutputType::default());
 
@@ -305,31 +344,7 @@ fn main() -> ExitCode {
     });
 
     rustc_driver::catch_with_exit_code(move || {
-        fn has_sysroot_arg(args: &[String]) -> bool {
-            // https://doc.rust-lang.org/rustc/command-line-arguments.html#path-load-command-line-flags-from-a-path
-            // Beside checking for existence of `--sysroot` on the command line, we need to
-            // check for the arg files that are prefixed with @ as well to be consistent with rustc
-            args.iter().any(|arg| {
-                if let Some(arg_file_path) = arg.strip_prefix('@')
-                    && let Ok(arg_file) = read_to_string(arg_file_path)
-                {
-                    arg_file.lines().any(|arg| is_arg(arg, "--sysroot"))
-                } else {
-                    is_arg(arg, "--sysroot")
-                }
-            })
-        }
-
         let mut orig_args = rustc_driver::args::raw_args(&early_dcx);
-
-        let sys_root_env = std::env::var("SYSROOT").ok();
-        let pass_sysroot_env_if_given = |args: &mut Vec<String>, sys_root_env| {
-            if let Some(sys_root) = sys_root_env
-                && !has_sysroot_arg(args)
-            {
-                args.splice(1..1, ["--sysroot".to_string(), sys_root]);
-            }
-        };
 
         // make "clippy-driver --rustc" work like a subcommand that passes further args to "rustc"
         // for example `clippy-driver --rustc --version` will print the rustc version that
@@ -340,10 +355,8 @@ fn main() -> ExitCode {
             orig_args[0] = "rustc".to_string();
 
             let mut args: Vec<String> = orig_args.clone();
-            pass_sysroot_env_if_given(&mut args, sys_root_env);
 
-            rustc_driver::run_compiler(&args, &mut DefaultCallbacks);
-            return ExitCode::SUCCESS;
+            return run_compiler(&early_dcx, &mut args, &mut DefaultCallbacks);
         }
 
         if matches!(command, Some(DriverCommand::Version)) {
@@ -369,7 +382,6 @@ fn main() -> ExitCode {
         }
 
         let mut args: Vec<String> = orig_args.clone();
-        pass_sysroot_env_if_given(&mut args, sys_root_env);
 
         let clippy_args_var = env::var("CLIPPY_ARGS").ok();
         let mut clippy_args = decode_clippy_args(clippy_args_var.as_deref().unwrap_or_default());
@@ -409,17 +421,17 @@ fn main() -> ExitCode {
                 eprintln!("error: could not replay Clippy argument file: {error}");
                 return ExitCode::FAILURE;
             }
-            rustc_driver::run_compiler(
-                &args,
+            run_compiler(
+                &early_dcx,
+                &mut args,
                 &mut ClippyCallbacks {
                     clippy_args_var,
                     argfile_fingerprint,
                 },
-            );
+            )
         } else {
-            rustc_driver::run_compiler(&args, &mut RustcCallbacks { clippy_args_var });
+            run_compiler(&early_dcx, &mut args, &mut RustcCallbacks { clippy_args_var })
         }
-        ExitCode::SUCCESS
     })
 }
 

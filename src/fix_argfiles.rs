@@ -5,6 +5,34 @@ use std::path::{Path, PathBuf};
 
 /// Substitute copies of streams in the compiler's directory, after dependencies have run.
 pub fn prepare(dir: &Path, args: &mut [String], handles: &mut Vec<File>) -> io::Result<()> {
+    replace(args, handles, |path| capture(dir, path))
+}
+
+/// Save one copy per stream argument so rustc can read it after sysroot detection.
+pub fn snapshot(
+    args: &mut [String],
+    handles: &mut Vec<File>,
+    copies: &mut Vec<tempfile::NamedTempFile>,
+) -> io::Result<()> {
+    replace(args, handles, |path| {
+        let Ok(metadata) = path.metadata() else { return Ok(None) };
+        if metadata.is_file() || metadata.is_dir() {
+            return Ok(None);
+        }
+        let mut copy = tempfile::NamedTempFile::new()?;
+        io::copy(&mut File::open(path)?, &mut copy)?;
+        let name = copy.path().to_owned();
+        copies.push(copy);
+        Ok(Some(name))
+    })
+}
+
+/// Resolve shell and line response files in the order rustc sees them.
+fn replace(
+    args: &mut [String],
+    handles: &mut Vec<File>,
+    mut replacement: impl FnMut(&Path) -> io::Result<Option<PathBuf>>,
+) -> io::Result<()> {
     let cwd = std::env::current_dir()?;
     let last_shell = args.iter().rposition(|arg| arg.starts_with("@shell:")).unwrap_or(0);
     let mut shell_enabled = false;
@@ -14,7 +42,7 @@ pub fn prepare(dir: &Path, args: &mut [String], handles: &mut Vec<File>) -> io::
         if let Some(name) = arg.strip_prefix('@') {
             let shell_name = name.strip_prefix("shell:").filter(|_| shell_enabled);
             let path = cwd.join(shell_name.unwrap_or(name));
-            let copy = capture(dir, &path)?;
+            let copy = replacement(&path)?;
             // Until shell mode is enabled, every earlier file uses rustc's line format.
             if inspect && let Some(text) = crate::argfile::read_regular(copy.as_ref().unwrap_or(&path)) {
                 shell_enabled = text.lines().any(|line| enables_shell(line, &mut next_unstable));
