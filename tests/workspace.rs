@@ -224,6 +224,8 @@ fn clippy_preserves_compiler_arguments() {
     std::fs::write(
         root.join("lib.rs"),
         r#"#![allow(unexpected_cfgs)]
+#[cfg(not(clippy))]
+compile_error!("lost Clippy configuration");
 #[cfg(not(payload = "left__CLIPPY_HACKERY__right"))]
 compile_error!("lost compiler argument");
 "#,
@@ -246,6 +248,12 @@ compile_error!("lost compiler argument");
     };
     let control = run(&[]);
     assert!(control.status.success(), "{}", String::from_utf8_lossy(&control.stderr));
+    let terminated = run(&["--"]);
+    assert!(
+        terminated.status.success(),
+        "{}",
+        String::from_utf8_lossy(&terminated.stderr)
+    );
     let empty = run(&[""]);
     let stderr = String::from_utf8_lossy(&empty.stderr);
     assert!(

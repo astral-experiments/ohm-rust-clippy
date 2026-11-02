@@ -327,7 +327,7 @@ fn main() -> ExitCode {
             if let Some(sys_root) = sys_root_env
                 && !has_sysroot_arg(args)
             {
-                args.extend(["--sysroot".to_string(), sys_root]);
+                args.splice(1..1, ["--sysroot".to_string(), sys_root]);
             }
         };
 
@@ -376,7 +376,6 @@ fn main() -> ExitCode {
         let original_len = clippy_args.len();
         clippy_args.retain(|arg| arg != "--no-deps");
         let no_deps = clippy_args.len() != original_len;
-        clippy_args.extend(["--cfg".into(), "clippy".into()]);
 
         // If no Clippy lints will be run we do not need to run Clippy
         let cap_lints_allow = arg_value(&orig_args, "--cap-lints", |val| val == "allow")
@@ -401,6 +400,7 @@ fn main() -> ExitCode {
                     .and_then(|root| argfile::fingerprint(&root, &argfiles))
                     .unwrap_or_else(|| "volatile".into())
             });
+            args.splice(1..1, ["--cfg".into(), "clippy".into()]);
             args.extend(clippy_args);
             let mut replay_handles = Vec::new();
             if let Some(dir) = env::var_os(argfile::FIX_DIR)
