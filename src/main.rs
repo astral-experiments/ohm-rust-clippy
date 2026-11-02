@@ -40,19 +40,20 @@ pub fn main() {
         })
         .collect();
 
-    // Check for version and help flags even when invoked as 'cargo-clippy'
-    if args.iter().any(|a| a == "--help" || a == "-h") {
+    // Everything after `--` is passed to the compiler, including option values.
+    let options = args.split(|arg| arg == "--").next().unwrap_or_default();
+    if options.iter().any(|a| a == "--help" || a == "-h") {
         show_help();
         return;
     }
 
-    if args.iter().any(|a| a == "--version" || a == "-V") {
+    if options.iter().any(|a| a == "--version" || a == "-V") {
         show_version();
         return;
     }
 
-    if let Some(pos) = args.iter().position(|a| a == "--explain") {
-        if let Some(lint) = args.get(pos + 1) {
+    if let Some(pos) = options.iter().position(|a| a == "--explain") {
+        if let Some(lint) = options.get(pos + 1) {
             let lint = lint.to_ascii_lowercase();
             process::exit(clippy_lints::explain(
                 &lint.strip_prefix("clippy::").unwrap_or(&lint).replace('-', "_"),
