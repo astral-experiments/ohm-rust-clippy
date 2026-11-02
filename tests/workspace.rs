@@ -4,6 +4,24 @@ use test_utils::{CARGO_CLIPPY_PATH, IS_RUSTC_TEST_SUITE};
 
 mod test_utils;
 
+#[cfg(unix)]
+#[test]
+fn non_unicode_argument_is_reported() {
+    use std::os::unix::ffi::OsStrExt as _;
+
+    if IS_RUSTC_TEST_SUITE {
+        return;
+    }
+    let output = Command::new(&*CARGO_CLIPPY_PATH)
+        .args(["clippy", "--target-dir"])
+        .arg(std::ffi::OsStr::from_bytes(b"out-\xff"))
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(1), "{stderr}");
+    assert!(stderr.contains("invalid UTF-8"), "{stderr}");
+}
+
 #[test]
 fn test_module_style_with_dep_in_subdir() {
     if IS_RUSTC_TEST_SUITE {
