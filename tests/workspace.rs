@@ -260,4 +260,14 @@ compile_error!("lost compiler argument");
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(!output.status.success() && stderr.contains("E0308"), "{path}: {stderr}");
     }
+
+    for path in ["--help", "--version", "--rustc"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_clippy-driver"))
+            .current_dir(root)
+            .args(["--crate-type=lib", "--emit=metadata", "lib.rs", "-L", path])
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success() && stderr.contains("E0308"), "{path}: {stderr}");
+    }
 }
