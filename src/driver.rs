@@ -27,6 +27,7 @@ use clippy_utils::sym;
 use declare_clippy_lint::LintListBuilder;
 use rustc_interface::interface;
 use rustc_session::config::ErrorOutputType;
+use rustc_session::getopts::{Fail, Options};
 use rustc_session::{EarlyDiagCtxt, Session};
 use rustc_span::symbol::Symbol;
 
@@ -255,6 +256,41 @@ fn display_help() -> ExitCode {
 
 const BUG_REPORT_URL: &str = "https://github.com/rust-lang/rust-clippy/issues/new?template=ice.yml";
 
+enum DriverCommand {
+    Rustc(usize),
+    Version,
+    Help,
+}
+
+/// Finds driver options without consuming rustc option values or reading argument files.
+fn driver_command(args: &[String]) -> Option<DriverCommand> {
+    // An argument file can supply an option that consumes the next token, or `--`.
+    let args = args.split(|arg| arg.starts_with('@')).next().unwrap_or_default();
+    let end = args
+        .iter()
+        .rposition(|arg| matches!(arg.as_str(), "--rustc" | "--version" | "-V" | "--help" | "-h"))?;
+    let mut options = Options::new();
+    for option in rustc_session::config::rustc_optgroups() {
+        option.apply(&mut options);
+    }
+
+    let mut command = None;
+    let mut args = args[..=end].iter().enumerate();
+    while let Some((pos, arg)) = args.next() {
+        match arg.as_str() {
+            "--" => break,
+            "--rustc" => return Some(DriverCommand::Rustc(pos)),
+            "--version" | "-V" => command = Some(DriverCommand::Version),
+            "--help" | "-h" if command.is_none() => command = Some(DriverCommand::Help),
+            arg if arg.starts_with('-') && matches!(options.parse([arg]), Err(Fail::ArgumentMissing(_))) => {
+                args.next();
+            },
+            _ => {},
+        }
+    }
+    command
+}
+
 fn main() -> ExitCode {
     let early_dcx = EarlyDiagCtxt::new(ErrorOutputType::default());
 
@@ -298,8 +334,9 @@ fn main() -> ExitCode {
         // make "clippy-driver --rustc" work like a subcommand that passes further args to "rustc"
         // for example `clippy-driver --rustc --version` will print the rustc version that
         // clippy-driver uses
-        if let Some(pos) = orig_args.iter().position(|arg| arg == "--rustc") {
-            orig_args.remove(pos);
+        let command = driver_command(&orig_args[1..]);
+        if let Some(DriverCommand::Rustc(pos)) = command {
+            orig_args.remove(pos + 1);
             orig_args[0] = "rustc".to_string();
 
             let mut args: Vec<String> = orig_args.clone();
@@ -309,7 +346,7 @@ fn main() -> ExitCode {
             return ExitCode::SUCCESS;
         }
 
-        if orig_args.iter().any(|a| a == "--version" || a == "-V") {
+        if matches!(command, Some(DriverCommand::Version)) {
             let version_info = rustc_tools_util::get_version_info!();
 
             return match writeln!(&mut anstream::stdout().lock(), "{version_info}") {
@@ -327,7 +364,7 @@ fn main() -> ExitCode {
             orig_args.remove(1);
         }
 
-        if !wrapper_mode && (orig_args.iter().any(|a| a == "--help" || a == "-h") || orig_args.len() == 1) {
+        if !wrapper_mode && (matches!(command, Some(DriverCommand::Help)) || orig_args.len() == 1) {
             return display_help();
         }
 
