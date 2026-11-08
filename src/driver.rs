@@ -102,7 +102,7 @@ fn track_clippy_args(sess: &Session, args_env_var: Option<&str>) {
 
 /// Track files that may be accessed at runtime in `file_depinfo` so that cargo will re-run clippy
 /// when any of them are modified
-fn track_files(sess: &Session) {
+fn track_files(sess: &Session, #[cfg(ohm_driver_read_checksum)] driver: Option<&incremental::DriverInput>) {
     let mut file_depinfo = sess.file_depinfo.borrow_mut();
 
     // Used by `clippy::cargo` lints and to determine the MSRV. `cargo clippy` executes `clippy-driver`
@@ -115,6 +115,11 @@ fn track_files(sess: &Session) {
 
     // A changed driver must rerun Clippy even when source and the reported version are unchanged.
     // This is required for incremental lint queries in release builds as well as development.
+    #[cfg(ohm_driver_read_checksum)]
+    if let Some(read) = driver.and_then(|driver| driver.observed.as_ref()) {
+        file_depinfo.record_read(Symbol::intern(&read.path), read.len, read.checksum);
+        return;
+    }
     if let Ok(current_exe) = env::current_exe()
         && let Some(current_exe) = current_exe.to_str()
     {
@@ -159,12 +164,18 @@ impl rustc_driver::Callbacks for ClippyCallbacks {
         #[cfg(ohm_incremental_driver_hash)]
         let conf_snapshot = clippy_config::snapshot_conf_file();
         #[cfg(ohm_incremental_driver_hash)]
-        let incremental_lints = incremental::configure(config, &conf_snapshot, clippy_args_var.as_deref());
+        let driver_input = incremental::configure(config, &conf_snapshot, clippy_args_var.as_deref());
+        #[cfg(ohm_incremental_driver_hash)]
+        let incremental_lints = driver_input.is_some();
         #[cfg(not(ohm_incremental_driver_hash))]
         let incremental_lints = false;
         config.track_state = Some(Box::new(move |sess| {
             track_clippy_args(sess, clippy_args_var.as_deref());
-            track_files(sess);
+            track_files(
+                sess,
+                #[cfg(ohm_driver_read_checksum)]
+                driver_input.as_ref(),
+            );
 
             sess.env_depinfo.borrow_mut().insert((
                 sym::CLIPPY_DISABLE_DOCS_LINKS,
