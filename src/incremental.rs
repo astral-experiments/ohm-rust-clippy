@@ -8,6 +8,8 @@ use std::io::{self, Read as _};
 use rustc_data_structures::fingerprint::Fingerprint;
 use rustc_data_structures::stable_hash::StableHasher;
 
+#[cfg(all(target_os = "linux", ohm_driver_read_checksum, ohm_verified_driver_checksum))]
+mod cargo_read;
 mod identity;
 
 /// Content identity for the query graph and, when supported, the matching dep-info read.
@@ -38,7 +40,15 @@ fn fingerprint_file(mut file: File, path: &str, want_checksum: bool) -> io::Resu
                 "Clippy's executable path no longer identifies the running image",
             ));
         }
-        let digest = rustc_span::SourceFileHash::new(rustc_span::SourceFileHashAlgorithm::Blake3, &mut file)?;
+        #[cfg(all(target_os = "linux", ohm_driver_read_checksum, ohm_verified_driver_checksum))]
+        let inherited = cargo_read::verified_checksum(&before, path);
+        #[cfg(not(all(target_os = "linux", ohm_driver_read_checksum, ohm_verified_driver_checksum)))]
+        let inherited = None;
+        let digest = if let Some(digest) = inherited {
+            digest
+        } else {
+            rustc_span::SourceFileHash::new(rustc_span::SourceFileHashAlgorithm::Blake3, &mut file)?
+        };
         hasher.write(digest.hash_bytes());
         checksum = Some(digest);
     } else {

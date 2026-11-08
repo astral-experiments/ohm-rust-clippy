@@ -19,6 +19,11 @@ fn main() {
         "driver_read_checksum",
         "extern crate rustc_session;\nextern crate rustc_span;\npub fn probe(sess: &rustc_session::Session, path: rustc_span::Symbol, sum: rustc_span::SourceFileHash) { let _ = &sess.opts.incremental_driver_hash; sess.file_depinfo.borrow_mut().record_read(path, 0, sum); }\n",
     );
+    println!("cargo:rustc-check-cfg=cfg(ohm_verified_driver_checksum)");
+    probe(
+        "verified_driver_checksum",
+        "extern crate rustc_span;\npub fn probe(bytes: [u8; 32]) -> rustc_span::SourceFileHash { rustc_span::SourceFileHash::from_blake3(bytes) }\n",
+    );
 }
 
 /// Keep the fork buildable with upstream rustc, using incremental lints only when the
