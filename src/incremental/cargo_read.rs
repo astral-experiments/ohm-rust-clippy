@@ -24,8 +24,16 @@ fn same_file(left: &Metadata, right: &Metadata) -> bool {
 }
 
 fn retained_by_parent(parent: u32, fd: RawFd, file: &File) -> Option<bool> {
+    // Cargo opens these descriptors with CLOEXEC and clears it only in the child it
+    // dispatches. A launcher passing its own descriptors through an older Cargo
+    // must clear CLOEXEC before exec, so those handles cannot authenticate a hash.
+    let info = fs::read_to_string(format!("/proc/{parent}/fdinfo/{fd}")).ok()?;
+    let field = |key| info.lines().find_map(|line| line.strip_prefix(key)).map(str::trim);
+    let flags = u32::from_str_radix(field("flags:")?, 8).ok()?;
+    let inode: u64 = field("ino:")?.parse().ok()?;
+    let local = file.metadata().ok()?;
     let parent_fd = fs::metadata(format!("/proc/{parent}/fd/{fd}")).ok()?;
-    Some(same_file(&parent_fd, &file.metadata().ok()?))
+    Some(flags & libc::O_CLOEXEC as u32 != 0 && inode == local.ino() && same_file(&parent_fd, &local))
 }
 
 /// Match the producer, inode and both timestamps before using any supplied checksum.
@@ -143,6 +151,16 @@ mod tests {
             changed[offset] ^= 1;
             assert!(decode(&changed, parent, &meta).is_none());
         }
+    }
+
+    #[test]
+    fn rejects_a_descriptor_passively_inherited_by_the_issuer() {
+        let input = File::open("/dev/null").unwrap();
+        let fd = input.as_raw_fd();
+        assert_eq!(retained_by_parent(std::process::id(), fd, &input), Some(true));
+        // SAFETY: this test owns the File and keeps it alive throughout this call.
+        assert_eq!(unsafe { libc::fcntl(fd, libc::F_SETFD, 0) }, 0);
+        assert_eq!(retained_by_parent(std::process::id(), fd, &input), Some(false));
     }
 
     #[test]
