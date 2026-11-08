@@ -4,6 +4,7 @@ fn main() {
     rustc_tools_util::setup_version_info!();
     println!("cargo:rustc-check-cfg=cfg(ohm_incremental_driver_hash)");
     println!("cargo:rustc-check-cfg=cfg(ohm_source_file_hash)");
+    println!("cargo:rustc-check-cfg=cfg(ohm_driver_read_checksum)");
     println!("cargo:rerun-if-env-changed=RUSTC");
     println!("cargo:rerun-if-env-changed=CARGO_ENCODED_RUSTFLAGS");
     probe(
@@ -13,6 +14,10 @@ fn main() {
     probe(
         "source_file_hash",
         "extern crate rustc_middle;\nextern crate rustc_span;\npub fn probe(tcx: rustc_middle::ty::TyCtxt<'_>, id: rustc_span::StableSourceFileId) { let _ = tcx.source_file_hash(id); }\n",
+    );
+    probe(
+        "driver_read_checksum",
+        "extern crate rustc_session;\nextern crate rustc_span;\npub fn probe(sess: &rustc_session::Session, path: rustc_span::Symbol, sum: rustc_span::SourceFileHash) { let _ = &sess.opts.incremental_driver_hash; sess.file_depinfo.borrow_mut().record_read(path, 0, sum); }\n",
     );
 }
 
