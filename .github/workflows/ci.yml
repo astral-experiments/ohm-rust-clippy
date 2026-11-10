@@ -20,7 +20,7 @@ env:
 jobs:
   lint:
     name: Formatting and lint registration
-    runs-on: depot-ubuntu-24.04-4
+    runs-on: ubuntu-24.04
     env:
       RUSTUP_TOOLCHAIN: nightly-2026-08-07
     steps:
@@ -49,7 +49,7 @@ jobs:
       matrix:
         include:
           - name: Tests
-            runner: depot-ubuntu-24.04-16
+            runner: namespace-profile-ubuntu-24-04-16
           - name: Tests (macOS)
             runner: macos-26
     env:
