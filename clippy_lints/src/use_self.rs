@@ -1,8 +1,8 @@
 use clippy_config::Conf;
 use clippy_utils::diagnostics::span_lint_and_sugg;
-use clippy_utils::is_from_proc_macro;
 use clippy_utils::msrvs::{self, Msrv};
 use clippy_utils::ty::{same_type_modulo_regions, ty_from_hir_ty};
+use clippy_utils::{is_from_proc_macro, resolved_path};
 use rustc_data_structures::fx::FxHashSet;
 use rustc_errors::Applicability;
 use rustc_hir::def::{CtorOf, DefKind, Res};
@@ -236,7 +236,7 @@ impl<'tcx> LateLintPass<'tcx> for UseSelf {
             && self.msrv.meets(cx, msrvs::TYPE_ALIAS_ENUM_VARIANTS)
         {
             match expr.kind {
-                ExprKind::Struct(QPath::Resolved(_, path), ..) => check_path(cx, path),
+                ExprKind::Struct(qpath, ..) if let Some(path) = resolved_path(qpath) => check_path(cx, path),
                 ExprKind::Call(fun, _) => {
                     if let ExprKind::Path(QPath::Resolved(_, path)) = fun.kind {
                         check_path(cx, path);
@@ -251,10 +251,15 @@ impl<'tcx> LateLintPass<'tcx> for UseSelf {
     fn check_pat(&mut self, cx: &LateContext<'_>, pat: &Pat<'_>) {
         if !pat.span.from_expansion()
             && let Some(&StackItem::Check { impl_id, .. }) = self.stack.last()
-            // get the path from the pattern
-            && let PatKind::Expr(&PatExpr { kind: PatExprKind::Path(QPath::Resolved(_, path)), .. })
-                 | PatKind::TupleStruct(QPath::Resolved(_, path), _, _)
-                 | PatKind::Struct(QPath::Resolved(_, path), _, _) = pat.kind
+            && let Some(path) = match &pat.kind {
+                PatKind::Expr(PatExpr {
+                    kind: PatExprKind::Path(QPath::Resolved(_, path)),
+                    ..
+                })
+                | PatKind::TupleStruct(QPath::Resolved(_, path), _, _) => Some(*path),
+                PatKind::Struct(qpath, _, _) => resolved_path(qpath),
+                _ => None,
+            }
             && cx.typeck_results().pat_ty(pat) == cx.tcx.type_of(impl_id).instantiate_identity().skip_norm_wip()
             && self.msrv.meets(cx, msrvs::TYPE_ALIAS_ENUM_VARIANTS)
         {

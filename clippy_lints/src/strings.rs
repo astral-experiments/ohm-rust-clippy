@@ -6,7 +6,7 @@ use rustc_errors::Applicability;
 use rustc_hir::attrs::lang_items::LangItem;
 use rustc_hir::def::{DefKind, Res};
 use rustc_hir::def_id::DefId;
-use rustc_hir::{BinOpKind, BorrowKind, Expr, ExprKind, Node};
+use rustc_hir::{BinOpKind, BorrowKind, Expr, ExprKind, Node, QPath};
 use rustc_lint::{LateContext, LateLintPass, LintContext as _};
 use rustc_middle::ty;
 use rustc_session::declare_lint_pass;
@@ -287,6 +287,7 @@ impl<'tcx> LateLintPass<'tcx> for StringLitAsBytes {
     fn check_expr(&mut self, cx: &LateContext<'tcx>, e: &'tcx Expr<'_>) {
         use rustc_ast::LitKind;
 
+        let is_range = |path: &QPath<'_>| cx.tcx.qpath_is_lang_item(*path, LangItem::Range);
         if let ExprKind::Call(fun, [bytes_arg]) = e.kind
             // Find `std::str::converts::from_utf8` or `std::primitive::str::from_utf8`
             && let Some(sym::str_from_utf8 | sym::str_inherent_from_utf8) =
@@ -301,8 +302,8 @@ impl<'tcx> LateLintPass<'tcx> for StringLitAsBytes {
             && expressions[0].1.is_empty()
 
             // Check for slicer
-            && let ExprKind::Struct(&qpath, _, _) = right.kind
-            && cx.tcx.qpath_is_lang_item(qpath, LangItem::Range)
+            && let ExprKind::Struct(qpath, _, _) = right.kind
+            && is_range(qpath)
         {
             let mut applicability = Applicability::MachineApplicable;
             let string_expression = &expressions[0].0;

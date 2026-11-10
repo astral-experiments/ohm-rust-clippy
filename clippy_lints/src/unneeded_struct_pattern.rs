@@ -1,8 +1,8 @@
 use clippy_utils::diagnostics::span_lint_and_sugg;
-use clippy_utils::is_from_proc_macro;
+use clippy_utils::{is_from_proc_macro, resolved_path};
 use rustc_errors::Applicability;
 use rustc_hir::def::{DefKind, Res};
-use rustc_hir::{Pat, PatKind, QPath};
+use rustc_hir::{Pat, PatKind};
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_session::declare_lint_pass;
 
@@ -43,8 +43,8 @@ declare_lint_pass!(UnneededStructPattern => [UNNEEDED_STRUCT_PATTERN]);
 impl LateLintPass<'_> for UnneededStructPattern {
     fn check_pat(&mut self, cx: &LateContext<'_>, pat: &Pat<'_>) {
         if !pat.span.from_expansion()
-            && let PatKind::Struct(path, [], _) = &pat.kind
-            && let QPath::Resolved(_, path) = path
+            && let PatKind::Struct(ref qpath, [], _) = pat.kind
+            && let Some(path) = resolved_path(qpath)
             && let Res::Def(DefKind::Variant, did) = path.res
         {
             let enum_did = cx.tcx.parent(did);
@@ -56,7 +56,7 @@ impl LateLintPass<'_> for UnneededStructPattern {
                 return;
             }
 
-            if is_from_proc_macro(cx, *path) {
+            if is_from_proc_macro(cx, path) {
                 return;
             }
 

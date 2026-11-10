@@ -687,7 +687,8 @@ impl<'a, 'tcx> PrintVisitor<'a, 'tcx> {
                 bind!(self, container, fields);
                 kind!("OffsetOf({container}, {fields})");
             },
-            ExprKind::Struct(qpath, fields, base) => {
+            ExprKind::Struct(path, fields, base) => {
+                let qpath: &QPath<'_> = path;
                 bind!(self, qpath, fields);
                 let base = OptionPat::new(match base {
                     StructTailExpr::Base(base) => Some(self.bind("base", base)),
@@ -779,7 +780,8 @@ impl<'a, 'tcx> PrintVisitor<'a, 'tcx> {
                 self.ident(name);
                 sub.if_some(|p| self.pat(p));
             },
-            PatKind::Struct(ref qpath, fields, etc) => {
+            PatKind::Struct(ref path, fields, etc) => {
+                let qpath: &QPath<'_> = path;
                 let ignore = etc.is_some();
                 bind!(self, qpath, fields);
                 kind!("Struct(ref {qpath}, {fields}, {ignore})");
