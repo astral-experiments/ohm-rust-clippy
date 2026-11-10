@@ -652,8 +652,6 @@ recommend to enable the entire set, but cherry pick lints out of.
 
 Before submitting your PR make sure you followed all the basic requirements:
 
-<!-- Sync this with `.github/PULL_REQUEST_TEMPLATE` -->
-
 - \[ ] Followed [lint naming conventions][lint_naming]
 - \[ ] Added passing UI tests (including committed `.stderr` file)
 - \[ ] `cargo test` passes locally
