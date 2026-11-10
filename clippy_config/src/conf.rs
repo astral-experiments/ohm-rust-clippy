@@ -10,8 +10,9 @@ use rustc_data_structures::fx::FxHashSet;
 use rustc_errors::Applicability;
 use rustc_hir::attrs::RustcVersion;
 use rustc_session::Session;
-use rustc_span::{Pos as _, SourceFile, Symbol};
-use std::path::PathBuf;
+use rustc_span::source_map::{FileLoader as _, RealFileLoader};
+use rustc_span::{FileName, Pos as _, SourceFile, Symbol};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use std::{env, fs, io};
 use toml::de::DeTable;
@@ -855,12 +856,64 @@ pub fn sanitize_explanation(raw_docs: &str) -> String {
     explanation
 }
 
-/// Searches for and loads the config file into the source map.
-///
-/// # Errors
-///
-/// Returns any unexpected filesystem error encountered when searching for the config file
+/// Configuration bytes and discovery diagnostics used by incremental lint queries.
+#[derive(Hash)]
+pub struct ConfigSnapshot {
+    source: Option<(PathBuf, String)>,
+    diagnostics: Vec<(bool, String)>,
+}
+
+impl ConfigSnapshot {
+    pub fn has_errors(&self) -> bool {
+        self.diagnostics.iter().any(|(is_error, _)| *is_error)
+    }
+
+    fn load(&self, sess: &Session) -> Option<Arc<SourceFile>> {
+        for (is_error, message) in &self.diagnostics {
+            emit_config_diagnostic(sess, *is_error, message.clone());
+        }
+        self.source.as_ref().map(|(path, contents)| {
+            let source_map = sess.source_map();
+            let filename = FileName::Real(
+                source_map
+                    .path_mapping()
+                    .to_real_filename(source_map.working_dir(), path),
+            );
+            source_map.new_source_file(filename, contents.clone())
+        })
+    }
+}
+
+/// Freeze discovery and contents before computing the incremental driver key.
+pub fn snapshot_conf_file() -> ConfigSnapshot {
+    let mut diagnostics = Vec::new();
+    let source = find_conf_file(
+        |path| {
+            RealFileLoader
+                .read_file(path)
+                .map(|contents| (path.to_owned(), contents))
+        },
+        |is_error, message| diagnostics.push((is_error, message)),
+    );
+    ConfigSnapshot { source, diagnostics }
+}
+
+fn emit_config_diagnostic(sess: &Session, is_error: bool, message: String) {
+    if is_error {
+        sess.dcx().err(message);
+    } else {
+        sess.dcx().warn(message);
+    }
+}
+
 fn load_conf_file(sess: &Session) -> Option<Arc<SourceFile>> {
+    find_conf_file(
+        |path| sess.source_map().load_file(path),
+        |is_error, message| emit_config_diagnostic(sess, is_error, message),
+    )
+}
+
+fn find_conf_file<T>(mut read: impl FnMut(&Path) -> io::Result<T>, mut emit: impl FnMut(bool, String)) -> Option<T> {
     /// Possible filename to search for.
     const CONFIG_FILE_NAMES: [&str; 2] = [".clippy.toml", "clippy.toml"];
 
@@ -880,26 +933,29 @@ fn load_conf_file(sess: &Session) -> Option<Arc<SourceFile>> {
     let mut current = match current.canonicalize() {
         Ok(x) => x,
         Err(e) => {
-            sess.dcx().err(format!("{msg}: {e}"));
+            emit(true, format!("{msg}: {e}"));
             return None;
         },
     };
 
-    let mut loaded_config: Option<(PathBuf, Arc<SourceFile>)> = None;
+    let mut loaded_config: Option<(PathBuf, T)> = None;
     loop {
         for config_file_name in CONFIG_FILE_NAMES {
             if let Ok(config_path) = current.join(config_file_name).canonicalize() {
                 if let Some((loaded_path, _)) = &loaded_config {
                     if fs::metadata(loaded_path).is_ok_and(|x| x.is_file()) {
                         // Warn if `.clippy.toml` and `clippy.toml` exist
-                        sess.dcx().warn(format!(
-                            "using config file `{}`, `{}` will be ignored",
-                            loaded_path.display(),
-                            config_path.display(),
-                        ));
+                        emit(
+                            false,
+                            format!(
+                                "using config file `{}`, `{}` will be ignored",
+                                loaded_path.display(),
+                                config_path.display(),
+                            ),
+                        );
                     }
                 } else {
-                    match sess.source_map().load_file(&config_path) {
+                    match read(&config_path) {
                         Ok(src) => loaded_config = Some((config_path, src)),
                         Err(e)
                             if matches!(
@@ -907,8 +963,7 @@ fn load_conf_file(sess: &Session) -> Option<Arc<SourceFile>> {
                                 io::ErrorKind::NotFound | io::ErrorKind::IsADirectory | io::ErrorKind::NotADirectory
                             ) => {},
                         Err(e) => {
-                            sess.dcx()
-                                .err(format!("error reading `{}`: {e}", config_path.display()));
+                            emit(true, format!("error reading `{}`: {e}", config_path.display()));
                             return None;
                         },
                     }
@@ -928,14 +983,20 @@ fn load_conf_file(sess: &Session) -> Option<Arc<SourceFile>> {
     }
 }
 
+static CONF: OnceLock<Conf> = OnceLock::new();
+
 impl Conf {
     pub fn load(sess: &Session) -> &'static Conf {
-        static CONF: OnceLock<Conf> = OnceLock::new();
-        CONF.get_or_init(|| Conf::load_inner(sess))
+        CONF.get_or_init(|| Conf::load_inner(sess, load_conf_file(sess)))
     }
 
-    fn load_inner(sess: &Session) -> Conf {
-        let mut conf = if let Some(src) = load_conf_file(sess) {
+    /// Parse the exact configuration included in the incremental driver key.
+    pub fn load_snapshot(sess: &Session, snapshot: &ConfigSnapshot) -> &'static Conf {
+        CONF.get_or_init(|| Conf::load_inner(sess, snapshot.load(sess)))
+    }
+
+    fn load_inner(sess: &Session, source: Option<Arc<SourceFile>>) -> Conf {
+        let mut conf = if let Some(src) = source {
             let dcx = DiagCtxt::new(sess, src.start_pos.to_usize());
             let src = src.src.as_ref().unwrap();
 
