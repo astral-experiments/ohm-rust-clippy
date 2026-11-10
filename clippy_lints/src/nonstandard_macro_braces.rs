@@ -54,6 +54,10 @@ impl MacroBraces {
 
 impl EarlyLintPass for MacroBraces {
     fn check_mac(&mut self, cx: &EarlyContext<'_>, mac: &ast::MacCall) {
+        if cx.get_lint_level_spec(NONSTANDARD_MACRO_BRACES).is_allow() {
+            return;
+        }
+
         if let Some(last_segment) = mac.path.segments.last()
             && let name = last_segment.ident.as_str()
             && let Some(&braces) = self.macro_braces.0.get(name)
@@ -130,6 +134,10 @@ impl EarlyLintPass for MacroBraces {
                     emit_help(cx, &snip, braces, snip_span, false);
                 }
             }
+        }
+
+        if cx.get_lint_level_spec(NONSTANDARD_MACRO_BRACES).is_allow() {
+            return;
         }
 
         if mac.macro_rules {
