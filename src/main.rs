@@ -115,6 +115,8 @@ impl ClippyCmd {
             .iter()
             .fold(String::new(), |s, arg| s + arg + "__CLIPPY_HACKERY__");
 
+        #[cfg(all(target_os = "linux", ohm_driver_read_checksum, ohm_verified_driver_checksum))]
+        cmd.env("CARGO_OHM_CLIPPY_DRIVER_HASH_VERSION", "1");
         cmd.env("RUSTC_WORKSPACE_WRAPPER", Self::path())
             .env("CLIPPY_ARGS", clippy_args)
             .arg(self.cargo_subcommand)
