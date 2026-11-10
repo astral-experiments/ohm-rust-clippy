@@ -59,7 +59,7 @@ pub(crate) fn check(cx: &LateContext<'_>, ex: &Expr<'_>, arms: &[Arm<'_>]) {
         // this is incorrect, as we should really check whether each variant is exhaustively
         // covered by the set of guards that cover it, but that's really hard to do.
         recurse_or_patterns(arm.pat, |pat| {
-            let path = match &peel_hir_pat_refs(pat).0.kind {
+            let path: &QPath<'_> = match &peel_hir_pat_refs(pat).0.kind {
                 PatKind::Expr(PatExpr {
                     hir_id,
                     kind: PatExprKind::Path(path),

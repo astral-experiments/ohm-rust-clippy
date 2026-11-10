@@ -404,6 +404,14 @@ pub fn is_def_id_trait_method(cx: &LateContext<'_>, def_id: LocalDefId) -> bool 
     }
 }
 
+/// Returns the resolved path, if name resolution did not defer it to type checking.
+pub fn resolved_path<'tcx>(qpath: &QPath<'tcx>) -> Option<&'tcx Path<'tcx>> {
+    match *qpath {
+        QPath::Resolved(_, path) => Some(path),
+        QPath::TypeRelative(..) => None,
+    }
+}
+
 pub fn last_path_segment<'tcx>(path: &QPath<'tcx>) -> &'tcx PathSegment<'tcx> {
     match *path {
         QPath::Resolved(_, path) => path.segments.last().expect("A path must have at least one segment"),
