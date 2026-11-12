@@ -57,10 +57,15 @@ declare_lint_pass!(ComparisonChain => [COMPARISON_CHAIN]);
 
 impl<'tcx> LateLintPass<'tcx> for ComparisonChain {
     fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx Expr<'_>) {
-        if expr.span.from_expansion() {
+        if !matches!(expr.kind, ExprKind::If(..)) || expr.span.from_expansion() {
             return;
         }
+        clippy_utils::source::with_tracked_source(cx, || Self::check_chain(cx, expr));
+    }
+}
 
+impl ComparisonChain {
+    fn check_chain(cx: &LateContext<'_>, expr: &Expr<'_>) {
         // We only care about the top-most `if` in the chain
         if is_else_clause(cx.tcx, expr) {
             return;

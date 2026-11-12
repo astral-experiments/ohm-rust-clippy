@@ -3,7 +3,7 @@ use clippy_utils::diagnostics::{span_lint_and_sugg, span_lint_hir_and_then};
 use clippy_utils::higher::has_let_expr;
 use clippy_utils::msrvs::{self, Msrv};
 use clippy_utils::res::MaybeDef as _;
-use clippy_utils::source::{SpanExt as _, snippet_with_context};
+use clippy_utils::source::{SpanExt as _, snippet_with_context, with_tracked_source};
 use clippy_utils::sugg::Sugg;
 use clippy_utils::ty::implements_trait;
 use clippy_utils::{eq_expr_value, sym};
@@ -107,7 +107,7 @@ impl<'tcx> LateLintPass<'tcx> for NonminimalBool {
         _: Span,
         _: LocalDefId,
     ) {
-        NonminimalBoolVisitor { cx, msrv: self.msrv }.visit_body(body);
+        with_tracked_source(cx, || NonminimalBoolVisitor { cx, msrv: self.msrv }.visit_body(body));
     }
 
     fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx Expr<'tcx>) {
@@ -119,7 +119,9 @@ impl<'tcx> LateLintPass<'tcx> for NonminimalBool {
             // !a == false;
             // ```
             ExprKind::Binary(op, left, right) if matches!(op.node, BinOpKind::Eq | BinOpKind::Ne) => {
-                check_inverted_bool_in_condition(cx, expr.span, op.node, left, right);
+                with_tracked_source(cx, || {
+                    check_inverted_bool_in_condition(cx, expr.span, op.node, left, right);
+                });
             },
             _ => {},
         }

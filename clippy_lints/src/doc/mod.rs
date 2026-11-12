@@ -1,6 +1,7 @@
 use clippy_config::Conf;
 use clippy_utils::attrs::is_doc_hidden;
 use clippy_utils::diagnostics::{span_lint, span_lint_and_help, span_lint_and_then};
+use clippy_utils::source::{track_span_source, with_tracked_source};
 use clippy_utils::{is_entrypoint_fn, is_trait_impl_item};
 use rustc_data_structures::fx::FxHashSet;
 use rustc_errors::Applicability;
@@ -707,7 +708,6 @@ declare_clippy_lint! {
 impl_lint_pass!(Documentation => [
     DOC_BROKEN_LINK,
     DOC_COMMENT_DOUBLE_SPACE_LINEBREAKS,
-    DOC_INCLUDE_WITHOUT_CFG,
     DOC_LAZY_CONTINUATION,
     DOC_LINK_CODE,
     DOC_LINK_WITH_QUOTES,
@@ -727,6 +727,8 @@ impl_lint_pass!(Documentation => [
     UNNECESSARY_SAFETY_DOC,
 ]);
 
+impl_lint_pass!(EarlyDocumentation => [DOC_INCLUDE_WITHOUT_CFG]);
+
 pub struct Documentation {
     valid_idents: &'static FxHashSet<String>,
     check_private_items: bool,
@@ -741,7 +743,9 @@ impl Documentation {
     }
 }
 
-impl EarlyLintPass for Documentation {
+pub struct EarlyDocumentation;
+
+impl EarlyLintPass for EarlyDocumentation {
     fn check_attributes(&mut self, cx: &EarlyContext<'_>, attrs: &[rustc_ast::Attribute]) {
         include_in_doc_without_cfg::check(cx, attrs);
     }
@@ -749,6 +753,12 @@ impl EarlyLintPass for Documentation {
 
 impl<'tcx> LateLintPass<'tcx> for Documentation {
     fn check_attributes(&mut self, cx: &LateContext<'tcx>, attrs: &'tcx [Attribute]) {
+        with_tracked_source(cx, || self.check_late_attributes(cx, attrs));
+    }
+}
+
+impl Documentation {
+    fn check_late_attributes<'tcx>(&self, cx: &LateContext<'tcx>, attrs: &'tcx [Attribute]) {
         let Some(headers) = check_attrs(cx, self.valid_idents, attrs) else {
             return;
         };
@@ -890,6 +900,8 @@ fn check_attrs(cx: &LateContext<'_>, valid_idents: &FxHashSet<String>, attrs: &[
     let mut doc = String::with_capacity(fragments.iter().map(|frag| frag.doc.as_str().len() + 1).sum());
 
     for fragment in &fragments {
+        // Rustdoc also maps Markdown byte ranges back to raw source spans.
+        track_span_source(cx, fragment.span);
         add_doc_fragment(&mut doc, fragment);
     }
     doc.pop();

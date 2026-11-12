@@ -6,8 +6,8 @@ use rustc_hir::def::{DefKind, Res};
 use rustc_hir::{self as hir, AmbigArg, find_attr};
 use rustc_lint::{LateContext, LateLintPass, LintContext as _};
 use rustc_session::impl_lint_pass;
-use rustc_span::Span;
 use rustc_span::edition::Edition;
+use rustc_span::{Span, SyntaxContext};
 use std::collections::BTreeMap;
 
 declare_clippy_lint! {
@@ -45,51 +45,43 @@ declare_clippy_lint! {
 
 impl_lint_pass!(MacroUseImports => [MACRO_USE_IMPORTS]);
 
-/// `MacroRefData` includes the name of the macro.
-#[derive(Debug, Clone)]
-pub struct MacroRefData {
-    name: String,
-}
-
-impl MacroRefData {
-    pub fn new(name: String) -> Self {
-        Self { name }
-    }
-}
-
 #[derive(Default)]
 pub struct MacroUseImports {
     /// the actual import path used and the span of the attribute above it. The value is
     /// the location, where the lint should be emitted.
     imports: Vec<(String, Span, hir::HirId)>,
-    /// the span of the macro reference, kept to ensure only one reference is used per macro call.
-    collected: FxHashSet<Span>,
-    mac_refs: Vec<MacroRefData>,
+    expansions: FxHashSet<SyntaxContext>,
+    /// The first visit selects how the lint spells each macro reference.
+    references: Vec<(Span, bool)>,
 }
 
 impl MacroUseImports {
-    fn push_unique_macro(&mut self, cx: &LateContext<'_>, span: Span) {
-        let call_site = span.source_callsite();
-        let name = snippet(cx, cx.sess().source_map().span_until_char(call_site, '!'), "_");
-        if span.source_callee().is_some() && !self.collected.contains(&call_site) {
-            let name = if name.contains("::") {
-                name.split("::").last().unwrap().to_string()
-            } else {
-                name.to_string()
-            };
-
-            self.mac_refs.push(MacroRefData::new(name));
-            self.collected.insert(call_site);
+    fn record_reference(&mut self, span: Span, strip_path: bool) {
+        let context = span.ctxt();
+        // For a non-root context the call site comes entirely from the
+        // expansion chain. Preserve its first visit and the original spelling.
+        if !context.is_root() && self.expansions.insert(context) {
+            self.references.push((span, strip_path));
         }
     }
 
-    fn push_unique_macro_pat_ty(&mut self, cx: &LateContext<'_>, span: Span) {
-        let call_site = span.source_callsite();
-        let name = snippet(cx, cx.sess().source_map().span_until_char(call_site, '!'), "_");
-        if span.source_callee().is_some() && !self.collected.contains(&call_site) {
-            self.mac_refs.push(MacroRefData::new(name.to_string()));
-            self.collected.insert(call_site);
+    fn macro_names(&self, cx: &LateContext<'_>) -> Vec<String> {
+        // Different inner expansions can still have the same outer call site.
+        let mut call_sites = FxHashSet::default();
+        let mut names = Vec::new();
+        for &(span, strip_path) in &self.references {
+            let call_site = span.source_callsite();
+            if call_sites.insert(call_site) {
+                let name = snippet(cx, cx.sess().source_map().span_until_char(call_site, '!'), "_");
+                let name = if strip_path {
+                    name.rsplit("::").next().unwrap()
+                } else {
+                    &name
+                };
+                names.push(name.to_owned());
+            }
         }
+        names
     }
 }
 
@@ -109,38 +101,34 @@ impl LateLintPass<'_> for MacroUseImports {
                     self.imports.push((def_path, mac_attr_span, hir_id));
                 }
             }
-        } else if item.span.from_expansion() {
-            self.push_unique_macro_pat_ty(cx, item.span);
+        } else {
+            self.record_reference(item.span, false);
         }
     }
-    fn check_expr(&mut self, cx: &LateContext<'_>, expr: &hir::Expr<'_>) {
-        if expr.span.from_expansion() {
-            self.push_unique_macro(cx, expr.span);
-        }
+    fn check_expr(&mut self, _: &LateContext<'_>, expr: &hir::Expr<'_>) {
+        self.record_reference(expr.span, true);
     }
-    fn check_stmt(&mut self, cx: &LateContext<'_>, stmt: &hir::Stmt<'_>) {
-        if stmt.span.from_expansion() {
-            self.push_unique_macro(cx, stmt.span);
-        }
+    fn check_stmt(&mut self, _: &LateContext<'_>, stmt: &hir::Stmt<'_>) {
+        self.record_reference(stmt.span, true);
     }
-    fn check_pat(&mut self, cx: &LateContext<'_>, pat: &hir::Pat<'_>) {
-        if pat.span.from_expansion() {
-            self.push_unique_macro_pat_ty(cx, pat.span);
-        }
+    fn check_pat(&mut self, _: &LateContext<'_>, pat: &hir::Pat<'_>) {
+        self.record_reference(pat.span, false);
     }
-    fn check_ty(&mut self, cx: &LateContext<'_>, ty: &hir::Ty<'_, AmbigArg>) {
-        if ty.span.from_expansion() {
-            self.push_unique_macro_pat_ty(cx, ty.span);
-        }
+    fn check_ty(&mut self, _: &LateContext<'_>, ty: &hir::Ty<'_, AmbigArg>) {
+        self.record_reference(ty.span, false);
     }
     fn check_crate_post(&mut self, cx: &LateContext<'_>) {
+        if self.imports.is_empty() {
+            return;
+        }
+        let mut mac_refs = self.macro_names(cx);
         let mut used = BTreeMap::new();
         let mut check_dup = vec![];
         for (import, span, hir_id) in &self.imports {
-            let found_idx = self.mac_refs.iter().position(|mac| import.ends_with(&mac.name));
+            let found_idx = mac_refs.iter().position(|name| import.ends_with(name.as_str()));
 
             if let Some(idx) = found_idx {
-                self.mac_refs.remove(idx);
+                mac_refs.remove(idx);
                 let seg = import.split("::").collect::<Vec<_>>();
 
                 match seg.as_slice() {
@@ -203,7 +191,7 @@ impl LateLintPass<'_> for MacroUseImports {
 
         // If mac_refs is not empty we have encountered an import we could not handle
         // such as `std::prelude::v1::foo` or some other macro that expands to an import.
-        if self.mac_refs.is_empty() {
+        if mac_refs.is_empty() {
             for ((root, span, ..), (path, hir_id)) in used {
                 let import = if let [single] = &path[..] {
                     format!("{root}::{single}")

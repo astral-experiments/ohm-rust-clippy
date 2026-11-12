@@ -17,26 +17,55 @@ use rustc_span::{
     StableSourceFileId, SyntaxContext, hygiene,
 };
 use std::borrow::Cow;
+use std::cell::Cell;
 use std::fmt;
 use std::ops::{Deref, Index, Range};
 
 /// The driver installs this only when rustc supports tracked source-file inputs.
 pub static SOURCE_FILE_INPUT: OnceLock<for<'tcx> fn(TyCtxt<'tcx>, StableSourceFileId)> = OnceLock::new();
 
+thread_local! {
+    static RECORD_SNIPPETS: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Track raw source reads by the lint and its suggestion and expression-comparison helpers.
+pub fn with_tracked_source<T>(cx: &LateContext<'_>, f: impl FnOnce() -> T) -> T {
+    struct Restore(bool);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            RECORD_SNIPPETS.set(self.0);
+        }
+    }
+    if !cx.only_module {
+        return f();
+    }
+    let _restore = Restore(RECORD_SNIPPETS.replace(true));
+    f()
+}
+
+fn track_observed_file(file: &SourceFile) {
+    rustc_middle::ty::tls::with(|tcx| {
+        if file.is_imported() || file.src.is_none() {
+            // External source availability can change without a new local HIR.
+            tcx.dep_graph
+                .read_index(rustc_middle::dep_graph::DepNodeIndex::FOREVER_RED_NODE);
+        } else {
+            SOURCE_FILE_INPUT.get().unwrap()(tcx, file.stable_id);
+        }
+    });
+}
+
 /// Record the source files used by a source-sensitive lint, including failed snippet reads.
 ///
 /// Only audited module passes use this hook. Whole-crate passes need no dependency.
-fn track_span_source(cx: &LateContext<'_>, span: Span) {
+pub fn track_span_source(cx: &LateContext<'_>, span: Span) {
     if cx.only_module {
-        let track = SOURCE_FILE_INPUT
-            .get()
-            .expect("source-sensitive module pass requires tracked inputs");
         let sm = cx.tcx.sess.source_map();
         let start = sm.lookup_source_file(span.lo());
         let end = sm.lookup_source_file(span.hi());
-        track(cx.tcx, start.stable_id);
+        track_observed_file(&start);
         if start.stable_id != end.stable_id {
-            track(cx.tcx, end.stable_id);
+            track_observed_file(&end);
         }
     }
 }
@@ -267,6 +296,12 @@ impl fmt::Debug for SourceText {
 fn get_source_range(sm: &SourceMap, sp: Range<BytePos>) -> Option<SourceFileRange> {
     let start = sm.lookup_byte_offset(sp.start);
     let end = sm.lookup_byte_offset(sp.end);
+    if RECORD_SNIPPETS.get() {
+        track_observed_file(&start.sf);
+        if start.sf.stable_id != end.sf.stable_id {
+            track_observed_file(&end.sf);
+        }
+    }
     if !Arc::ptr_eq(&start.sf, &end.sf) || start.pos > end.pos {
         return None;
     }
@@ -625,7 +660,15 @@ fn snippet_with_applicability_sm<'a>(
 
 /// Converts a span to a code snippet. Returns `None` if not available.
 pub fn snippet_opt<'sm>(sm: impl HasSourceMap<'sm>, span: Span) -> Option<String> {
-    sm.source_map().span_to_snippet(span).ok()
+    let sm = sm.source_map();
+    if RECORD_SNIPPETS.get() {
+        let start = sm.lookup_source_file(span.lo());
+        track_observed_file(&start);
+        if span.hi() > start.end_position() {
+            track_observed_file(&sm.lookup_source_file(span.hi()));
+        }
+    }
+    sm.span_to_snippet(span).ok()
 }
 
 /// Converts a span (from a block) to a code snippet if available, otherwise use default.
@@ -802,6 +845,9 @@ pub fn walk_span_to_context(span: Span, outer: SyntaxContext) -> Option<Span> {
 pub fn trim_span(sm: &SourceMap, span: Span) -> Span {
     let data = span.data();
     let sf: &_ = &sm.lookup_source_file(data.lo);
+    if RECORD_SNIPPETS.get() {
+        track_observed_file(sf);
+    }
     let Some(src) = sf.src.as_deref() else {
         return span;
     };
