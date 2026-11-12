@@ -36,6 +36,10 @@ macro_rules! audited_passes {
 
 #[rustfmt::skip]
 audited_passes!((conf: &'static Conf), [
+        Documentation: crate::doc::Documentation = crate::doc::Documentation::new(conf),
+        UnitExpressions: crate::unit_types::UnitExpressions = crate::unit_types::UnitExpressions,
+        NonminimalBool: crate::booleans::NonminimalBool = crate::booleans::NonminimalBool::new(conf),
+        ComparisonChain: crate::comparison_chain::ComparisonChain = crate::comparison_chain::ComparisonChain,
         UnnecessaryWraps: crate::unnecessary_wraps::UnnecessaryWraps = crate::unnecessary_wraps::UnnecessaryWraps::new(conf),
         NeedlessBorrowsForGenericArgs: crate::needless_borrows_for_generic_args::NeedlessBorrowsForGenericArgs<'tcx> = crate::needless_borrows_for_generic_args::NeedlessBorrowsForGenericArgs::new(conf),
         NeedlessPassByValue: crate::needless_pass_by_value::NeedlessPassByValue = crate::needless_pass_by_value::NeedlessPassByValue,
@@ -114,8 +118,21 @@ fn inputs_available(lints: &LintVec) -> bool {
     clippy_utils::source::SOURCE_FILE_INPUT.get().is_some() || !lints.iter().any(|lint| requires_source_input(lint))
 }
 
-fn requires_source_input(lint: &rustc_lint::Lint) -> bool {
-    std::ptr::eq(lint, crate::needless_pass_by_value::NEEDLESS_PASS_BY_VALUE)
+fn requires_source_input(lint: &'static rustc_lint::Lint) -> bool {
+    static DOC_LINTS: OnceLock<FxHashSet<LintId>> = OnceLock::new();
+    let doc_lints = DOC_LINTS.get_or_init(|| {
+        crate::doc::Documentation::lint_vec()
+            .into_iter()
+            .map(LintId::of)
+            .collect()
+    });
+    if doc_lints.contains(&LintId::of(lint)) || std::ptr::eq(lint, crate::unit_types::UNIT_ARG) {
+        return true;
+    }
+    std::ptr::eq(lint, crate::booleans::NONMINIMAL_BOOL)
+        || std::ptr::eq(lint, crate::booleans::OVERLY_COMPLEX_BOOL_EXPR)
+        || std::ptr::eq(lint, crate::comparison_chain::COMPARISON_CHAIN)
+        || std::ptr::eq(lint, crate::needless_pass_by_value::NEEDLESS_PASS_BY_VALUE)
         || std::ptr::eq(lint, crate::redundant_clone::REDUNDANT_CLONE)
         || std::ptr::eq(lint, crate::unnecessary_wraps::UNNECESSARY_WRAPS)
         || std::ptr::eq(

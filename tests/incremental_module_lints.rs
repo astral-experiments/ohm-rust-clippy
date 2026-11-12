@@ -603,6 +603,114 @@ fn source_sensitive_lints_observe_trait_changes() {
 
 #[test]
 #[cfg(ohm_source_file_hash)]
+fn boolean_suggestions_observe_source_and_sibling_types() {
+    for threads in [1, 4] {
+        let mut fixture = Fixture::new(threads);
+        fixture.lints = vec!["clippy::nonminimal_bool".into(), "clippy::comparison_chain".into()];
+        fixture.whole_crate_reference = true;
+        fixture.expect_source_input = true;
+        fixture.write(
+            "lib.rs",
+            "#![warn(clippy::nonminimal_bool, clippy::comparison_chain)]\npub mod first; pub mod value;\n",
+        );
+        fixture.write("value.rs", "pub type N = u16;\n");
+        fixture.write(
+            "first.rs",
+            r#"
+pub fn negate(x: bool, y: bool) -> bool { !(x /* ONE */ && y) == true }
+pub fn cmp(x: crate::value::N, y: crate::value::N) -> u16 {
+    if x > y { 1 } else if x < y { 2 } else { 3 }
+}
+
+"#,
+        );
+        let both = [("clippy::nonminimal_bool", 1), ("clippy::comparison_chain", 1)];
+        fixture.check_counts(&both, "not-loaded");
+        fixture.check_counts(&both, "loaded");
+        fixture.replace("first.rs", "/* ONE */", "/* TWO */");
+        let edited = fixture.compare(Some("loaded"));
+        assert!(edited.iter().any(|d| {
+            d["code"]["code"] == "clippy::nonminimal_bool"
+                && d["children"].as_array().unwrap().iter().any(|child| {
+                    child["spans"].as_array().unwrap().iter().any(|span| {
+                        span["suggested_replacement"]
+                            .as_str()
+                            .is_some_and(|s| s.contains("/* TWO */"))
+                    })
+                })
+        }));
+        fixture.replace("value.rs", "u16", "f32");
+        fixture.check_counts(
+            &[("clippy::nonminimal_bool", 1), ("clippy::comparison_chain", 0)],
+            "loaded",
+        );
+    }
+}
+
+#[test]
+#[cfg(ohm_source_file_hash)]
+fn documentation_tracks_source_spans_and_reexports() {
+    for threads in [1, 4] {
+        let mut fixture = Fixture::new(threads);
+        let markdown = "clippy::doc_markdown";
+        let errors = "clippy::missing_errors_doc";
+        fixture.lints = vec![markdown.into(), errors.into()];
+        fixture.whole_crate_reference = true;
+        fixture.expect_source_input = true;
+        fixture.write(
+            "lib.rs",
+            "#![warn(clippy::doc_markdown, clippy::missing_errors_doc)]\nmod first;\npub use first::fallible;\n",
+        );
+        fixture.write(
+            "first.rs",
+            "#[doc = \"The foo_bar function.\"  ]\npub fn fallible() -> Result<u8, ()> { Err(()) }\n",
+        );
+        let initial = fixture.compare(Some("not-loaded"));
+        assert_eq!(count(&initial, markdown), 1);
+        assert_eq!(count(&initial, errors), 1);
+        fixture.replace(
+            "first.rs",
+            "= \"The foo_bar function.\"  ",
+            "=  \"The foo_bar function.\" ",
+        );
+        let moved = fixture.compare(Some("loaded"));
+        assert_eq!(count(&moved, markdown), 1);
+        fixture.replace("lib.rs", "pub use first::fallible;", "use first::fallible;");
+        let private = fixture.compare(Some("loaded"));
+        assert_eq!(count(&private, errors), 0);
+        fixture.replace("lib.rs", "use first::fallible;", "pub use first::fallible;");
+        fixture.check_counts(&[(markdown, 1), (errors, 1)], "loaded");
+    }
+}
+
+#[test]
+#[cfg(ohm_source_file_hash)]
+fn unit_expression_checks_observe_sibling_return_types() {
+    for threads in [1, 4] {
+        let mut fixture = Fixture::new(threads);
+        let unit_arg = "clippy::unit_arg";
+        let unit_cmp = "clippy::unit_cmp";
+        fixture.lints = vec![unit_arg.into(), unit_cmp.into()];
+        fixture.whole_crate_reference = true;
+        fixture.expect_source_input = true;
+        fixture.write(
+            "lib.rs",
+            "#![warn(clippy::unit_arg, clippy::unit_cmp)]\npub mod first; pub mod value;\n",
+        );
+        fixture.write("value.rs", "pub fn get() {}\n");
+        fixture.write("first.rs", "fn take<T>(_: T) {} pub fn f() { take(crate::value::get()); assert_eq!(crate::value::get(), crate::value::get()); }\n");
+        let both = [(unit_arg, 1), (unit_cmp, 1)];
+        fixture.check_counts(&both, "not-loaded");
+        fixture.check_counts(&both, "loaded");
+        fixture.write("value.rs", "pub fn get() -> u8 { 1 }\n");
+        fixture.check_counts(&[(unit_arg, 0), (unit_cmp, 0)], "loaded");
+        fixture.write("value.rs", "pub fn get() {}\n");
+        fixture.check_counts(&both, "loaded");
+    }
+}
+
+#[test]
+#[cfg(ohm_source_file_hash)]
 fn source_text_changes_invalidate_suggestions() {
     for threads in [1, 4] {
         let mut fixture = Fixture::new(threads);

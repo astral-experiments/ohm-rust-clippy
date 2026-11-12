@@ -97,7 +97,11 @@ declare_clippy_lint! {
     "comparing unit values"
 }
 
-impl_lint_pass!(UnitTypes => [LET_UNIT_VALUE, UNIT_ARG, UNIT_CMP]);
+impl_lint_pass!(UnitExpressions => [UNIT_ARG, UNIT_CMP]);
+
+impl_lint_pass!(UnitTypes => [LET_UNIT_VALUE]);
+
+pub struct UnitExpressions;
 
 pub struct UnitTypes {
     format_args: FormatArgsStorage,
@@ -113,9 +117,11 @@ impl<'tcx> LateLintPass<'tcx> for UnitTypes {
     fn check_local(&mut self, cx: &LateContext<'tcx>, local: &'tcx LetStmt<'tcx>) {
         let_unit_value::check(cx, &self.format_args, local);
     }
+}
 
+impl<'tcx> LateLintPass<'tcx> for UnitExpressions {
     fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx Expr<'tcx>) {
         unit_cmp::check(cx, expr);
-        unit_arg::check(cx, expr);
+        clippy_utils::source::with_tracked_source(cx, || unit_arg::check(cx, expr));
     }
 }
