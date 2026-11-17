@@ -545,7 +545,7 @@ fn source_sensitive_ui_cases_replay_in_an_unchanged_module() {
         ("clippy::unnecessary_wraps", include_str!("ui/unnecessary_wraps.rs")),
         (
             "clippy::needless_borrows_for_generic_args",
-            include_str!("ui/needless_borrows_for_generic_args/needless_borrows_for_generic_args.rs"),
+            include_str!("ui/needless_borrows_for_generic_args.rs"),
         ),
     ] {
         for threads in [1, 4] {
