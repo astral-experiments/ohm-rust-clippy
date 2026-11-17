@@ -10,6 +10,8 @@ publish = false
 # One of the versions of winapi is only a dev dependency: allowed
 [dependencies]
 ctrlc = "=3.1.0"
+# nix 0.9, used by ctrlc, requires macOS APIs removed from newer libc releases.
+libc = "=0.2.177"
 [dev-dependencies]
 ansi_term = "=0.11.0"
 
