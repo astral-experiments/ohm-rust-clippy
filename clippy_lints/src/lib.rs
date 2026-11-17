@@ -40,6 +40,7 @@ extern crate rustc_lint;
 extern crate rustc_middle;
 extern crate rustc_parse_format;
 extern crate rustc_resolve;
+extern crate rustc_session;
 extern crate rustc_span;
 extern crate rustc_structures;
 extern crate rustc_target;
@@ -423,6 +424,8 @@ use rustc_lint::is_lint_pass_required;
 use rustc_middle::ty::TyCtxt;
 use utils::attr_collector::AttrStorage;
 
+pub mod incremental_lints;
+
 pub fn explain(name: &str) -> i32 {
     let target = format!("clippy::{}", name.to_ascii_uppercase());
     if let Some(info) = declared_lints::LINTS.iter().find(|info| info.lint.name == target) {
@@ -447,7 +450,7 @@ pub fn explain(name: &str) -> i32 {
 /// Register all lints and lint groups with the rustc lint store
 ///
 /// Used in `./src/driver.rs`.
-pub fn register_lint_passes(store: &mut rustc_lint::LintStore, conf: &'static Conf) {
+pub fn register_lint_passes(store: &mut rustc_lint::LintStore, conf: &'static Conf, incremental: bool) {
     for (old_name, new_name) in deprecated_lints::RENAMED {
         store.register_renamed(old_name, new_name);
     }
@@ -474,9 +477,15 @@ pub fn register_lint_passes(store: &mut rustc_lint::LintStore, conf: &'static Co
         }));
     }
 
+    if incremental {
+        incremental_lints::register(store, conf);
+    }
+
     store.register_late_lint_pass(Box::new(move |tcx: TyCtxt<'_>| {
         let skippable_lints = tcx.skippable_lints(());
-        let is_active = |lints: &rustc_lint::LintVec| is_lint_pass_required(skippable_lints, lints);
+        let is_active = |lints: &rustc_lint::LintVec| {
+            is_lint_pass_required(skippable_lints, lints) && !(incremental && incremental_lints::contains_pass(lints))
+        };
         Box::new(CombinedLateLintPass::new(
             tcx,
             conf,
