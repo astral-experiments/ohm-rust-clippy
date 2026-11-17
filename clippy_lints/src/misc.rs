@@ -180,6 +180,10 @@ impl Id<'_> {
 }
 
 fn used_ident<'tcx>(expr: &'tcx Expr<'_>) -> Option<(Ident, Id<'tcx>)> {
+    #[allow(
+        clippy::match_same_arms,
+        reason = "Ohm wraps struct paths, so the bindings have different types"
+    )]
     let qpath: &QPath<'_> = match expr.kind {
         ExprKind::Path(ref path) => path,
         ExprKind::Struct(path, ..) => path,
