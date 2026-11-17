@@ -6,10 +6,11 @@ use clippy_utils::{method_calls, sym};
 use rustc_ast::BorrowKind;
 use rustc_errors::Applicability;
 use rustc_hir::attrs::lang_items::LangItem;
-use rustc_hir::{Expr, ExprKind};
+use rustc_hir::{Expr, ExprKind, QPath};
 use rustc_lint::LateContext;
 
 pub(super) fn check_call(cx: &LateContext<'_>, expr: &Expr<'_>, fun: &Expr<'_>, args: &[Expr<'_>]) {
+    let is_range = |qpath: &QPath<'_>| cx.tcx.qpath_is_lang_item(*qpath, LangItem::Range);
     // Find `std::str::converts::from_utf8` or `std::primitive::str::from_utf8`
 
     if let [bytes_arg] = args && let Some(sym::str_from_utf8 | sym::str_inherent_from_utf8) =
@@ -24,8 +25,8 @@ pub(super) fn check_call(cx: &LateContext<'_>, expr: &Expr<'_>, fun: &Expr<'_>, 
         && expressions[0].1.is_empty()
 
         // Check for slicer
-        && let ExprKind::Struct(&qpath, _, _) = right.kind
-        && cx.tcx.qpath_is_lang_item(qpath, LangItem::Range)
+        && let ExprKind::Struct(qpath, _, _) = right.kind
+        && is_range(qpath)
     {
         let mut applicability = Applicability::MachineApplicable;
         let string_expression = &expressions[0].0;

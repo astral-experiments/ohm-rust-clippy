@@ -219,14 +219,15 @@ impl<'a> Range<'a> {
     /// Higher a `hir` range to something similar to `ast::ExprKind::Range`.
     pub fn hir(cx: &LateContext<'_>, expr: &'a Expr<'_>) -> Option<Range<'a>> {
         let span = expr.range_span()?;
+        let lang_item = |path: &QPath<'_>| cx.tcx.qpath_lang_item(*path);
         let (ty, start, end) = match expr.kind {
             ExprKind::Call(path, [arg1, arg2])
                 if let ExprKind::Path(qpath) = path.kind
-                    && cx.tcx.qpath_is_lang_item(qpath, LangItem::RangeInclusiveNew) =>
+                    && lang_item(&qpath) == Some(LangItem::RangeInclusiveNew) =>
             {
                 (RangeTy::OpsInclusive, Some(arg1), Some(arg2))
             },
-            ExprKind::Struct(&qpath, fields, StructTailExpr::None) => match (cx.tcx.qpath_lang_item(qpath)?, fields) {
+            ExprKind::Struct(qpath, fields, StructTailExpr::None) => match (lang_item(qpath)?, fields) {
                 (LangItem::RangeFull, []) => (RangeTy::OpsFull, None, None),
                 (LangItem::RangeFrom, [start]) if start.ident.name == sym::start => {
                     (RangeTy::OpsFrom, Some(start.expr), None)
