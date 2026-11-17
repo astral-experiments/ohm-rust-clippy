@@ -7,7 +7,7 @@ use rustc_hir::def_id::LocalDefId;
 use rustc_hir::{BinOpKind, Expr, ExprKind, HirId, Node, QPath, Stmt, StmtKind};
 use rustc_lint::{LateContext, LateLintPass, declare_lint_pass};
 use rustc_middle::ty;
-use rustc_span::{Span, Symbol};
+use rustc_span::{Ident, Span, Symbol};
 
 declare_clippy_lint! {
     /// ### What it does
@@ -179,31 +179,30 @@ impl Id<'_> {
     }
 }
 
+fn used_ident<'tcx>(expr: &'tcx Expr<'_>) -> Option<(Ident, Id<'tcx>)> {
+    #[allow(
+        clippy::match_same_arms,
+        reason = "Ohm wraps struct paths, so the bindings have different types"
+    )]
+    let qpath: &QPath<'_> = match expr.kind {
+        ExprKind::Path(ref path) => path,
+        ExprKind::Struct(path, ..) => path,
+        ExprKind::MethodCall(path, ..) => return Some((path.ident, Id::TyRel)),
+        ExprKind::Field(base, ident) => return Some((ident, Id::FieldOf(base))),
+        _ => return None,
+    };
+    match qpath {
+        QPath::Resolved(_, path) => {
+            let id = Id::from_res(path.res)?;
+            Some((path.segments.last()?.ident, id))
+        },
+        QPath::TypeRelative(_, segment) => Some((segment.ident, Id::TyRel)),
+    }
+}
+
 fn check_used_underscore<'tcx>(cx: &LateContext<'tcx>, e: &'tcx Expr<'_>) {
-    let (ident, id) = match e.kind {
-        ExprKind::Path(path) => match path {
-            QPath::Resolved(_, path)
-                if let Some(id) = Id::from_res(path.res)
-                    && let [.., seg] = path.segments =>
-            {
-                (seg.ident, id)
-            },
-            QPath::Resolved(..) => return,
-            QPath::TypeRelative(_, seg) => (seg.ident, Id::TyRel),
-        },
-        ExprKind::MethodCall(path, ..) => (path.ident, Id::TyRel),
-        ExprKind::Struct(path, ..) => match path {
-            QPath::Resolved(_, path)
-                if let Some(id) = Id::from_res(path.res)
-                    && let [.., seg] = path.segments =>
-            {
-                (seg.ident, id)
-            },
-            QPath::Resolved(..) => return,
-            QPath::TypeRelative(_, seg) => (seg.ident, Id::TyRel),
-        },
-        ExprKind::Field(base, ident) => (ident, Id::FieldOf(base)),
-        _ => return,
+    let Some((ident, id)) = used_ident(e) else {
+        return;
     };
 
     if ident.name.as_str().strip_prefix('_').is_some_and(|x| !x.starts_with('_'))
