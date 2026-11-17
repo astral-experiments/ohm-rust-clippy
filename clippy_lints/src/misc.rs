@@ -206,13 +206,9 @@ fn check_used_underscore<'tcx>(cx: &LateContext<'tcx>, e: &'tcx Expr<'_>) {
         _ => return,
     };
 
-    if !e.span.from_expansion()
+    if ident.name.as_str().strip_prefix('_').is_some_and(|x| !x.starts_with('_'))
+        && !e.span.from_expansion()
         && !ident.span.from_expansion()
-        && ident
-            .name
-            .as_str()
-            .strip_prefix('_')
-            .is_some_and(|x| !x.starts_with('_'))
         && let Some((def_hir_id, def_sp)) = id.get_local_def(cx, e, ident.name)
         && !def_sp.from_expansion()
         // Only lint when rustc's `unused_variables` would trigger
