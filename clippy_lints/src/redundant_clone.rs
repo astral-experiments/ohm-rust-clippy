@@ -255,7 +255,8 @@ impl<'tcx> LateLintPass<'tcx> for RedundantClone {
 
 fn contains_clone_like_call(body: &Body<'_>) -> bool {
     for_each_expr_without_closures(body, |expr| {
-        if let ExprKind::MethodCall(method, ..) = expr.kind
+        if let ExprKind::MethodCall(method, receiver, ..) = expr.kind
+            && !matches!(receiver.kind, ExprKind::Lit(_))
             && matches!(
                 method.ident.name,
                 sym::clone | sym::to_owned | sym::to_string | sym::to_path_buf | sym::to_os_string
