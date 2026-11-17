@@ -3,21 +3,29 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     rustc_tools_util::setup_version_info!();
     println!("cargo:rustc-check-cfg=cfg(ohm_incremental_driver_hash)");
+    println!("cargo:rustc-check-cfg=cfg(ohm_source_file_hash)");
     println!("cargo:rerun-if-env-changed=RUSTC");
     println!("cargo:rerun-if-env-changed=CARGO_ENCODED_RUSTFLAGS");
-    probe_incremental_driver_hash();
+    probe(
+        "incremental_driver_hash",
+        "extern crate rustc_session;\npub fn probe(options: &mut rustc_session::config::Options) { options.incremental_driver_hash = None; }\n",
+    );
+    probe(
+        "source_file_hash",
+        "extern crate rustc_middle;\nextern crate rustc_span;\npub fn probe(tcx: rustc_middle::ty::TyCtxt<'_>, id: rustc_span::StableSourceFileId) { let _ = tcx.source_file_hash(id); }\n",
+    );
 }
 
 /// Keep the fork buildable with upstream rustc, using incremental lints only when the
 /// compiler can track driver inputs independently of crate identity.
-fn probe_incremental_driver_hash() {
+fn probe(name: &str, body: &str) {
     use std::path::PathBuf;
     use std::process::Command;
     use std::{env, fs};
 
     let out = PathBuf::from(env::var_os("OUT_DIR").unwrap());
-    let source = out.join("incremental_driver_hash_probe.rs");
-    fs::write(&source, "#![feature(rustc_private)]\nextern crate rustc_session;\npub fn probe(options: &mut rustc_session::config::Options) { options.incremental_driver_hash = None; }\n").unwrap();
+    let source = out.join(format!("{name}_probe.rs"));
+    fs::write(&source, format!("#![feature(rustc_private)]\n{body}")).unwrap();
     let available = Command::new(env::var_os("RUSTC").unwrap())
         // Bootstrap can supply the rustc-private library search path through these flags.
         .args(
@@ -45,12 +53,12 @@ fn probe_incremental_driver_hash() {
         Ok(output) => {
             // Retain the reason for fallback in the build directory, without adding noise
             // to ordinary builds with an upstream compiler.
-            let _ = fs::write(out.join("incremental_driver_hash_probe.stderr"), output.stderr);
+            let _ = fs::write(out.join(format!("{name}_probe.stderr")), output.stderr);
             output.status.success()
         },
         Err(_) => false,
     };
     if available {
-        println!("cargo:rustc-cfg=ohm_incremental_driver_hash");
+        println!("cargo:rustc-cfg=ohm_{name}");
     }
 }

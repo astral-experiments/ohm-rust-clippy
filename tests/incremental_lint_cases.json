@@ -368,5 +368,33 @@
       "ref_patterns"
     ],
     "source": "pub fn f() { let ref x = 1; let _ = x; }"
+  },
+  {
+    "lints": [
+      "needless_pass_by_value"
+    ],
+    "source": "pub fn f(value: Vec<u8>) -> Vec<u8> { value.clone() }",
+    "pass": "NeedlessPassByValue"
+  },
+  {
+    "lints": [
+      "redundant_clone"
+    ],
+    "source": "pub fn f(value: String) -> String { value.clone() }",
+    "pass": "RedundantClone"
+  },
+  {
+    "pass": "UnnecessaryWraps",
+    "lints": [
+      "unnecessary_wraps"
+    ],
+    "source": "pub fn f() -> Option<u8> { Some(1) }"
+  },
+  {
+    "pass": "NeedlessBorrowsForGenericArgs",
+    "lints": [
+      "needless_borrows_for_generic_args"
+    ],
+    "source": "fn take(_: impl AsRef<str>) {} pub fn f() { take(&\"value\"); }"
   }
 ]

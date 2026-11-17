@@ -148,6 +148,12 @@ struct ClippyCallbacks {
 impl rustc_driver::Callbacks for ClippyCallbacks {
     #[expect(rustc::bad_opt_access, reason = "necessary in clippy driver to set `mir_opt_level`")]
     fn config(&mut self, config: &mut interface::Config) {
+        #[cfg(ohm_source_file_hash)]
+        clippy_utils::source::SOURCE_FILE_INPUT.get_or_init(|| {
+            |tcx, id| {
+                let _ = tcx.source_file_hash(id);
+            }
+        });
         let previous = config.register_lints.take();
         let clippy_args_var = self.clippy_args_var.take();
         #[cfg(ohm_incremental_driver_hash)]
