@@ -537,6 +537,7 @@ fn configuration_changes_affect_cached_lints() {
 #[cfg(ohm_source_file_hash)]
 fn source_sensitive_ui_cases_replay_in_an_unchanged_module() {
     for (lint, source) in [
+        ("clippy::bool_comparison", include_str!("ui/bool_comparison.rs")),
         (
             "clippy::needless_pass_by_value",
             include_str!("ui/needless_pass_by_value.rs"),
@@ -598,6 +599,26 @@ fn source_sensitive_lints_observe_trait_changes() {
         );
         fixture.write("second.rs", "#[derive(Clone)] pub struct S(pub u8);\n");
         fixture.check_counts(&counts, "loaded");
+    }
+}
+
+#[test]
+#[cfg(ohm_source_file_hash)]
+fn overlapping_boolean_suggestions_keep_their_order() {
+    for threads in [1, 4] {
+        let mut fixture = Fixture::new(threads);
+        fixture.lints = vec!["clippy::nonminimal_bool".into(), "clippy::bool_comparison".into()];
+        fixture.write("lib.rs", "pub fn f(x: bool) -> bool { !x != true }\n");
+        let (expected, _) = fixture.run(None, None);
+        for lint in &fixture.lints {
+            assert_eq!(count(&expected, lint), 1);
+        }
+
+        // Automatic fixes prefer the last suggestion when both replace the same expression.
+        for state in ["not-loaded", "loaded"] {
+            let (diagnostics, _) = fixture.run(Some(&fixture.path("incremental")), Some(state));
+            assert_eq!(diagnostics, expected);
+        }
     }
 }
 
