@@ -767,6 +767,7 @@ rustc_lint::late_lint_methods!(
         ManualRetain: manual_retain::ManualRetain = manual_retain::ManualRetain::new(conf),
         ManualRotate: manual_rotate::ManualRotate = manual_rotate::ManualRotate,
         Operators: operators::Operators = operators::Operators::new(conf),
+        CmpOwned: operators::cmp_owned::CmpOwned = operators::cmp_owned::CmpOwned,
         StdReexports: std_instead_of_core::StdReexports = std_instead_of_core::StdReexports::new(conf),
         UncheckedTimeSubtraction: time_subtraction::UncheckedTimeSubtraction = time_subtraction::UncheckedTimeSubtraction::new(conf),
         PartialeqToNone: partialeq_to_none::PartialeqToNone = partialeq_to_none::PartialeqToNone,

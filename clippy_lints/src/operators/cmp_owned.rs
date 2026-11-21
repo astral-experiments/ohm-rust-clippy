@@ -1,19 +1,27 @@
 use clippy_utils::diagnostics::span_lint_and_then;
 use clippy_utils::res::MaybeQPath as _;
-use clippy_utils::source::snippet_with_context;
+use clippy_utils::source::{snippet_with_context, with_tracked_source};
 use clippy_utils::sym;
 use clippy_utils::ty::{implements_trait, is_copy};
 use rustc_errors::Applicability;
-use rustc_hir::{BinOpKind, Expr, ExprKind, UnOp};
-use rustc_lint::LateContext;
+use rustc_hir::{Expr, ExprKind, UnOp};
+use rustc_lint::{LateContext, LateLintPass, declare_lint_pass};
 use rustc_middle::ty::Ty;
 
 use super::CMP_OWNED;
 
-pub(super) fn check(cx: &LateContext<'_>, e: &Expr<'_>, op: BinOpKind, lhs: &Expr<'_>, rhs: &Expr<'_>) {
-    if op.is_comparison() {
-        check_op(cx, e, lhs, rhs, true);
-        check_op(cx, e, rhs, lhs, false);
+declare_lint_pass!(CmpOwned => [CMP_OWNED]);
+
+impl<'tcx> LateLintPass<'tcx> for CmpOwned {
+    fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx Expr<'tcx>) {
+        if let ExprKind::Binary(op, lhs, rhs) = expr.kind
+            && op.node.is_comparison()
+        {
+            with_tracked_source(cx, || {
+                check_op(cx, expr, lhs, rhs, true);
+                check_op(cx, expr, rhs, lhs, false);
+            });
+        }
     }
 }
 
