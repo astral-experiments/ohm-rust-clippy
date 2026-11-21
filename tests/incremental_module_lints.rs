@@ -539,6 +539,13 @@ fn source_sensitive_ui_cases_replay_in_an_unchanged_module() {
     for (lint, source) in [
         ("clippy::bool_comparison", include_str!("ui/bool_comparison.rs")),
         (
+            "clippy::cmp_owned",
+            concat!(
+                "#![warn(clippy::cmp_owned)]\n",
+                include_str!("ui/cmp_owned/asymmetric_partial_eq.rs")
+            ),
+        ),
+        (
             "clippy::needless_pass_by_value",
             include_str!("ui/needless_pass_by_value.rs"),
         ),
@@ -604,20 +611,33 @@ fn source_sensitive_lints_observe_trait_changes() {
 
 #[test]
 #[cfg(ohm_source_file_hash)]
-fn overlapping_boolean_suggestions_keep_their_order() {
-    for threads in [1, 4] {
-        let mut fixture = Fixture::new(threads);
-        fixture.lints = vec!["clippy::nonminimal_bool".into(), "clippy::bool_comparison".into()];
-        fixture.write("lib.rs", "pub fn f(x: bool) -> bool { !x != true }\n");
-        let (expected, _) = fixture.run(None, None);
-        for lint in &fixture.lints {
-            assert_eq!(count(&expected, lint), 1);
-        }
+fn overlapping_suggestions_keep_their_order() {
+    for (first, second, source) in [
+        (
+            "clippy::nonminimal_bool",
+            "clippy::bool_comparison",
+            "pub fn f(x: bool) -> bool { !x != true }\n",
+        ),
+        (
+            "clippy::redundant_clone",
+            "clippy::cmp_owned",
+            "pub fn cmp(left: String, right: String) -> bool { left.to_owned() == right }\n",
+        ),
+    ] {
+        for threads in [1, 4] {
+            let mut fixture = Fixture::new(threads);
+            fixture.lints = vec![first.into(), second.into()];
+            fixture.write("lib.rs", source);
+            let (expected, _) = fixture.run(None, None);
+            for lint in &fixture.lints {
+                assert_eq!(count(&expected, lint), 1, "{lint}");
+            }
 
-        // Automatic fixes prefer the last suggestion when both replace the same expression.
-        for state in ["not-loaded", "loaded"] {
-            let (diagnostics, _) = fixture.run(Some(&fixture.path("incremental")), Some(state));
-            assert_eq!(diagnostics, expected);
+            // Automatic fixes prefer the last suggestion when the edits overlap.
+            for state in ["not-loaded", "loaded"] {
+                let (diagnostics, _) = fixture.run(Some(&fixture.path("incremental")), Some(state));
+                assert_eq!(diagnostics, expected);
+            }
         }
     }
 }
