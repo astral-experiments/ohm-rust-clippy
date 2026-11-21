@@ -1,4 +1,5 @@
 use clippy_utils::diagnostics::span_lint_and_sugg;
+use clippy_utils::source::with_tracked_source;
 use clippy_utils::sugg::Sugg;
 use clippy_utils::{is_expn_of, peel_blocks, sym};
 use rustc_ast::ast::LitKind;
@@ -116,7 +117,7 @@ fn check_comparison<'a, 'tcx>(
         // calling `source_callsite` make sure macros are handled correctly, see issue #9907
         let binop_span = left_side.span.source_callsite().to(right_side.span.source_callsite());
 
-        match (fetch_bool_expr(left_side), fetch_bool_expr(right_side)) {
+        with_tracked_source(cx, || match (fetch_bool_expr(left_side), fetch_bool_expr(right_side)) {
             (Some(true), None) => left_true.map_or((), |(h, m)| {
                 suggest_bool_comparison(cx, binop_span, right_side, applicability, m, h);
             }),
@@ -143,7 +144,7 @@ fn check_comparison<'a, 'tcx>(
                 );
             }),
             _ => (),
-        }
+        });
     }
 }
 
