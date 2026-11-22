@@ -32,7 +32,7 @@ use clippy_utils::{
 };
 use rustc_hir::{Arm, Expr, ExprKind, LetStmt, MatchSource, Pat, PatKind};
 use rustc_lexer::{TokenKind, is_whitespace};
-use rustc_lint::{LateContext, LateLintPass, impl_lint_pass};
+use rustc_lint::{LateContext, LateLintPass, declare_lint_pass, impl_lint_pass};
 use rustc_span::Span;
 
 declare_clippy_lint! {
@@ -1006,23 +1006,6 @@ declare_clippy_lint! {
     "a wildcard pattern used with others patterns in same match arm"
 }
 
-// Keep suggestions for matches! in the same traversal as surrounding boolean expressions.
-rustc_lint::declare_lint_pass!(RedundantMatches => [REDUNDANT_PATTERN_MATCHING]);
-
-impl<'tcx> LateLintPass<'tcx> for RedundantMatches {
-    fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx Expr<'_>) {
-        if let ExprKind::Match(ex, arms, _) = expr.kind
-            && let [arm, _] = arms
-            && is_direct_expn_of(expr.span, sym::matches).is_some()
-        {
-            clippy_utils::source::with_tracked_source(cx, || {
-                redundant_pattern_match::check_match(cx, expr, ex, arms);
-                redundant_pattern_match::check_matches_true(cx, expr, arm, ex);
-            });
-        }
-    }
-}
-
 impl_lint_pass!(Matches => [
     COLLAPSIBLE_MATCH,
     INFALLIBLE_DESTRUCTURING_MATCH,
@@ -1052,6 +1035,23 @@ impl_lint_pass!(Matches => [
     WILDCARD_ENUM_MATCH_ARM,
     WILDCARD_IN_OR_PATTERNS,
 ]);
+
+declare_lint_pass!(RedundantMatches => [REDUNDANT_PATTERN_MATCHING]);
+
+// Keep suggestions for matches! in the same traversal as surrounding boolean expressions.
+impl<'tcx> LateLintPass<'tcx> for RedundantMatches {
+    fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx Expr<'_>) {
+        if let ExprKind::Match(ex, arms, _) = expr.kind
+            && let [arm, _] = arms
+            && is_direct_expn_of(expr.span, sym::matches).is_some()
+        {
+            clippy_utils::source::with_tracked_source(cx, || {
+                redundant_pattern_match::check_match(cx, expr, ex, arms);
+                redundant_pattern_match::check_matches_true(cx, expr, arm, ex);
+            });
+        }
+    }
+}
 
 pub struct Matches {
     msrv: Msrv,
