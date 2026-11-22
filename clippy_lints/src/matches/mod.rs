@@ -1024,9 +1024,7 @@ impl_lint_pass!(Matches => [
     MATCH_STR_CASE_MISMATCH,
     MATCH_WILDCARD_FOR_SINGLE_VARIANTS,
     MATCH_WILD_ERR_ARM,
-    NEEDLESS_MATCH,
     REDUNDANT_GUARDS,
-    REDUNDANT_PATTERN_MATCHING,
     REST_PAT_IN_FULLY_BOUND_STRUCTS,
     SIGNIFICANT_DROP_IN_SCRUTINEE,
     SINGLE_MATCH,
@@ -1036,21 +1034,58 @@ impl_lint_pass!(Matches => [
     WILDCARD_IN_OR_PATTERNS,
 ]);
 
-declare_lint_pass!(RedundantMatches => [REDUNDANT_PATTERN_MATCHING]);
+declare_lint_pass!(RedundantMatches => [NEEDLESS_MATCH, REDUNDANT_PATTERN_MATCHING]);
 
-// Keep suggestions for matches! in the same traversal as surrounding boolean expressions.
+// Keep nested patterns and boolean expressions in the same traversal. The
+// automatic fixer uses their diagnostic order to resolve overlapping edits.
 impl<'tcx> LateLintPass<'tcx> for RedundantMatches {
     fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx Expr<'_>) {
-        if let ExprKind::Match(ex, arms, _) = expr.kind
-            && let [arm, _] = arms
-            && is_direct_expn_of(expr.span, sym::matches).is_some()
-        {
-            clippy_utils::source::with_tracked_source(cx, || {
-                redundant_pattern_match::check_match(cx, expr, ex, arms);
-                redundant_pattern_match::check_matches_true(cx, expr, arm, ex);
-            });
+        if !matches!(expr.kind, ExprKind::Match(..) | ExprKind::If(..) | ExprKind::Loop(..)) {
+            return;
         }
+        clippy_utils::source::with_tracked_source(cx, || {
+            if let ExprKind::Match(ex, arms, source) = expr.kind {
+                if let [arm, _] = arms
+                    && is_direct_expn_of(expr.span, sym::matches).is_some()
+                {
+                    redundant_pattern_match::check_match(cx, expr, ex, arms);
+                    redundant_pattern_match::check_matches_true(cx, expr, arm, ex);
+                } else if source == MatchSource::Normal && !expr.span.from_expansion() {
+                    redundant_pattern_match::check_match(cx, expr, ex, arms);
+                    needless_match::check_match(cx, ex, arms, expr);
+                }
+            } else if !expr.span.from_expansion()
+                && let Some(if_let) = higher::IfLet::hir(cx, expr)
+            {
+                redundant_pattern_match::check_if_let(
+                    cx,
+                    expr,
+                    if_let.let_pat,
+                    if_let.let_expr,
+                    if_let.if_else.is_some(),
+                    if_let.let_span,
+                );
+                needless_match::check_if_let(cx, expr, &if_let);
+            } else if !expr.span.from_expansion()
+                && let Some(while_let) = higher::WhileLet::hir(expr)
+            {
+                redundant_pattern_match::check_while_let(
+                    cx,
+                    expr,
+                    while_let.let_pat,
+                    while_let.let_expr,
+                    while_let.let_span,
+                );
+            }
+        });
     }
+}
+
+/// Only repeat the whole-crate source checks for a candidate simplification.
+/// The span filter reads raw source even when it suppresses a diagnostic.
+fn has_complete_match_source(cx: &LateContext<'_>, expr: &Expr<'_>, ex: &Expr<'_>, arms: &[Arm<'_>]) -> bool {
+    clippy_utils::source::track_span_source(cx, expr.span);
+    is_span_match(cx, expr.span) && match_comments(cx, expr.span, ex.span, arms).is_some()
 }
 
 pub struct Matches {
@@ -1095,29 +1130,7 @@ impl<'tcx> LateLintPass<'tcx> for Matches {
                 try_err::check(cx, expr, ex);
             }
 
-            if !from_expansion
-                && let mut has_cfg = false
-                && let mut has_comments = false
-                && walk_intra_arm_text(cx, expr.span, ex.span, arms, |s| {
-                    let mut iter = tokenize_with_text(s).filter(|(t, ..)| match t {
-                        TokenKind::Whitespace => false,
-                        TokenKind::LineComment { .. } | TokenKind::BlockComment { .. } => {
-                            has_comments = true;
-                            false
-                        },
-                        _ => true,
-                    });
-                    while let Some((t, ..)) = iter.next() {
-                        if matches!(t, TokenKind::Pound)
-                            && matches!(iter.next(), Some((TokenKind::OpenBracket, ..)))
-                            && matches!(iter.next(), Some((TokenKind::Ident, "cfg", _)))
-                        {
-                            has_cfg = true;
-                        }
-                    }
-                })
-                && !has_cfg
-            {
+            if !from_expansion && let Some(has_comments) = match_comments(cx, expr.span, ex.span, arms) {
                 if source == MatchSource::Normal {
                     let is_match_like_matches = self.msrv.meets(cx, msrvs::MATCHES_MACRO)
                         && match_like_matches::check_match(cx, expr, ex, arms);
@@ -1131,13 +1144,11 @@ impl<'tcx> LateLintPass<'tcx> for Matches {
                         match_same_arms::check(cx, arms);
                     }
 
-                    redundant_pattern_match::check_match(cx, expr, ex, arms);
                     single_match::check(cx, ex, arms, expr, has_comments);
                     match_bool::check(cx, ex, arms, expr);
                     overlapping_arms::check(cx, ex, arms);
                     match_wild_enum::check(cx, ex, arms);
                     match_as_ref::check(cx, ex, arms, expr);
-                    needless_match::check_match(cx, ex, arms, expr);
                     match_str_case_mismatch::check(cx, ex, arms);
                     redundant_guards::check(cx, arms, self.msrv);
 
@@ -1211,29 +1222,11 @@ impl<'tcx> LateLintPass<'tcx> for Matches {
                         );
                     }
                 }
-                redundant_pattern_match::check_if_let(
-                    cx,
-                    expr,
-                    if_let.let_pat,
-                    if_let.let_expr,
-                    if_let.if_else.is_some(),
-                    if_let.let_span,
-                );
-                needless_match::check_if_let(cx, expr, &if_let);
             }
         } else if let Some(while_let) = higher::WhileLet::hir(expr)
             && !expr.span.in_external_macro(cx.tcx.sess.source_map())
         {
             significant_drop_in_scrutinee::check_while_let(cx, expr, while_let.let_expr, while_let.if_then);
-            if !from_expansion {
-                redundant_pattern_match::check_while_let(
-                    cx,
-                    expr,
-                    while_let.let_pat,
-                    while_let.let_expr,
-                    while_let.let_span,
-                );
-            }
         }
     }
 
@@ -1245,6 +1238,32 @@ impl<'tcx> LateLintPass<'tcx> for Matches {
     fn check_pat(&mut self, cx: &LateContext<'tcx>, pat: &'tcx Pat<'_>) {
         rest_pat_in_fully_bound_struct::check(cx, pat);
     }
+}
+
+/// Returns whether the arms have intervening comments, or `None` if their source
+/// is unavailable or conditional compilation could hide other arms.
+fn match_comments(cx: &LateContext<'_>, match_sp: Span, scrutinee_sp: Span, arms: &[Arm<'_>]) -> Option<bool> {
+    let mut has_cfg = false;
+    let mut has_comments = false;
+    let available = walk_intra_arm_text(cx, match_sp, scrutinee_sp, arms, |s| {
+        let mut iter = tokenize_with_text(s).filter(|(t, ..)| match t {
+            TokenKind::Whitespace => false,
+            TokenKind::LineComment { .. } | TokenKind::BlockComment { .. } => {
+                has_comments = true;
+                false
+            },
+            _ => true,
+        });
+        while let Some((t, ..)) = iter.next() {
+            if matches!(t, TokenKind::Pound)
+                && matches!(iter.next(), Some((TokenKind::OpenBracket, ..)))
+                && matches!(iter.next(), Some((TokenKind::Ident, "cfg", _)))
+            {
+                has_cfg = true;
+            }
+        }
+    });
+    (available && !has_cfg).then_some(has_comments)
 }
 
 /// Calls the given function for each segment of the source text within the

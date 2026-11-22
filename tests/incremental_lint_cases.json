@@ -25,9 +25,10 @@
   {
     "pass": "RedundantMatches",
     "lints": [
+      "needless_match",
       "redundant_pattern_matching"
     ],
-    "source": "pub fn f(x: bool) -> bool { matches!(x, true) }"
+    "source": "pub fn f(x: bool) -> bool { matches!(match x { true => true, false => false }, true) }"
   },
   {
     "pass": "ComparisonChain",

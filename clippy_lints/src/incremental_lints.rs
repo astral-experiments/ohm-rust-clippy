@@ -114,9 +114,7 @@ pub(crate) fn register(store: &mut rustc_lint::LintStore, conf: &'static Conf) {
 
 /// Whether a complete late pass has moved to the module traversal.
 pub(crate) fn contains_pass(lints: &LintVec) -> bool {
-    // Matches also emits REDUNDANT_PATTERN_MATCHING for ordinary matches and if/while let.
-    // Keep that pass active when only the separate matches! checks are cached.
-    !lints.is_empty() && lints.iter().all(|lint| lint_ids().contains(&LintId::of(lint))) && inputs_available(lints)
+    inputs_available(lints) && lints.iter().any(|lint| lint_ids().contains(&LintId::of(lint)))
 }
 
 /// Older compilers retain the whole-crate traversal for source-sensitive passes.
@@ -140,6 +138,7 @@ fn requires_source_input(lint: &'static rustc_lint::Lint) -> bool {
         || std::ptr::eq(lint, crate::needless_bool::NEEDLESS_BOOL)
         || std::ptr::eq(lint, crate::needless_bool::NEEDLESS_BOOL_ASSIGN)
         || std::ptr::eq(lint, crate::matches::REDUNDANT_PATTERN_MATCHING)
+        || std::ptr::eq(lint, crate::matches::NEEDLESS_MATCH)
         || std::ptr::eq(lint, crate::bool_comparison::BOOL_COMPARISON)
         || std::ptr::eq(lint, crate::comparison_chain::COMPARISON_CHAIN)
         || std::ptr::eq(lint, crate::needless_pass_by_value::NEEDLESS_PASS_BY_VALUE)

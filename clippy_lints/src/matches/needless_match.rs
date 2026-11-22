@@ -16,6 +16,9 @@ use rustc_span::{SyntaxContext, sym};
 
 pub(crate) fn check_match(cx: &LateContext<'_>, ex: &Expr<'_>, arms: &[Arm<'_>], expr: &Expr<'_>) {
     if arms.len() > 1 && expr_ty_matches_p_ty(cx, ex, expr) && check_all_arms(cx, expr.span.ctxt(), ex, arms) {
+        if !super::has_complete_match_source(cx, expr, ex, arms) {
+            return;
+        }
         let mut applicability = Applicability::MachineApplicable;
         span_lint_and_sugg(
             cx,

@@ -267,8 +267,9 @@ fn find_method_sugg_for_if_let<'tcx>(
 }
 
 pub(super) fn check_match<'tcx>(cx: &LateContext<'tcx>, expr: &'tcx Expr<'_>, op: &Expr<'_>, arms: &[Arm<'_>]) {
-    if let Ok(arms) = arms.try_into() // TODO: use `slice::as_array` once stabilized
-        && let Some((good_method, maybe_guard)) = found_good_method(cx, arms)
+    if let Ok(pair) = arms.try_into() // TODO: use `slice::as_array` once stabilized
+        && let Some((good_method, maybe_guard)) = found_good_method(cx, pair)
+        && (expr.span.from_expansion() || super::has_complete_match_source(cx, expr, op, arms))
     {
         let has_nested_let_chain = maybe_guard.is_some_and(|guard|
             // wow, the HIR for match guards in `PAT if let PAT = expr && expr => ...` is annoying!
