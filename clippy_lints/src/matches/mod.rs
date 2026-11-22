@@ -1103,7 +1103,6 @@ impl Matches {
 }
 
 impl<'tcx> LateLintPass<'tcx> for Matches {
-    #[expect(clippy::too_many_lines)]
     fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx Expr<'_>) {
         let from_expansion = expr.span.from_expansion();
 
