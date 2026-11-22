@@ -108,7 +108,37 @@ impl ClippyCmd {
         path
     }
 
-    fn into_std_cmd(self) -> Command {
+    /// Fixers use the order of machine-readable diagnostics to resolve overlapping edits.
+    fn needs_ordered_lints(&self) -> bool {
+        if self.cargo_subcommand == "fix" {
+            return true;
+        }
+        let mut json = false;
+        let mut args = self.args.iter().map(String::as_str);
+        while let Some(arg) = args.next() {
+            let format = if arg == "--message-format" {
+                args.next()
+            } else {
+                arg.strip_prefix("--message-format=")
+            };
+            if let Some(format) = format {
+                for option in format.split(',') {
+                    if option.eq_ignore_ascii_case("json-render-diagnostics") {
+                        // Cargo renders the diagnostics itself and omits them from the JSON stream.
+                        return false;
+                    }
+                    json |= option.to_ascii_lowercase().starts_with("json");
+                }
+            }
+        }
+        json
+    }
+
+    fn into_std_cmd(mut self) -> Command {
+        if cfg!(ohm_incremental_driver_hash) && self.needs_ordered_lints() {
+            // CLIPPY_ARGS is tracked in both Cargo's dep-info and rustc's incremental key.
+            self.clippy_args.push("--ohm-ordered-lints".into());
+        }
         let mut cmd = Command::new(env::var("CARGO").unwrap_or_else(|_| "cargo".into()));
         let clippy_args: String = self
             .clippy_args
@@ -187,6 +217,25 @@ You can use tool lints to allow or deny lints from your code, e.g.:
 #[cfg(test)]
 mod tests {
     use super::ClippyCmd;
+
+    #[test]
+    fn ordered_lints_for_fixes_and_json_diagnostics() {
+        for (args, ordered) in [
+            ("", false),
+            ("--message-format=human", false),
+            ("--message-format short", false),
+            ("-- --message-format=json", false),
+            ("--message-format=json,json-render-diagnostics", false),
+            ("--message-format=json --message-format=json-render-diagnostics", false),
+            ("--message-format=JSON", true),
+            ("--message-format json-diagnostic-rendered-ansi", true),
+            ("--message-format=json,json-diagnostic-short", true),
+            ("--fix --message-format=json-render-diagnostics", true),
+        ] {
+            let cmd = ClippyCmd::new(args.split_whitespace().map(ToString::to_string));
+            assert_eq!(cmd.needs_ordered_lints(), ordered, "{args}");
+        }
+    }
 
     #[test]
     fn fix() {
