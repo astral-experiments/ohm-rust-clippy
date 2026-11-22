@@ -8,6 +8,13 @@
     "source": "pub fn not_not(x: bool) -> bool { !!x } pub fn redundant(x: bool, y: bool) -> bool { x && y || x }"
   },
   {
+    "pass": "BoolComparison",
+    "lints": [
+      "bool_comparison"
+    ],
+    "source": "pub fn cmp(x: bool) -> bool { x == true }"
+  },
+  {
     "pass": "ComparisonChain",
     "lints": [
       "comparison_chain"
