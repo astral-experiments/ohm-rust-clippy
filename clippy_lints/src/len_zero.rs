@@ -2,7 +2,7 @@ use clippy_config::Conf;
 use clippy_utils::diagnostics::span_lint_and_sugg;
 use clippy_utils::msrvs::Msrv;
 use clippy_utils::res::{MaybeDef as _, MaybeTypeckRes as _};
-use clippy_utils::source::{SpanExt as _, snippet_with_context};
+use clippy_utils::source::{tracked_snippet_with_context, tracked_text, with_tracked_source};
 use clippy_utils::sugg::{Sugg, has_enclosing_paren};
 use clippy_utils::ty::implements_trait;
 use clippy_utils::{parent_item_name, peel_ref_operators, sym};
@@ -118,7 +118,10 @@ impl<'tcx> LateLintPass<'tcx> for LenZero {
             let mut applicability = Applicability::MachineApplicable;
 
             let lit1 = peel_ref_operators(cx, lt.init);
-            let lit_str = Sugg::hir_with_context(cx, lit1, lt.span.ctxt(), "_", &mut applicability).maybe_paren();
+            let lit_str = with_tracked_source(cx, || {
+                Sugg::hir_with_context(cx, lit1, lt.span.ctxt(), "_", &mut applicability)
+            })
+            .maybe_paren();
 
             span_lint_and_sugg(
                 cx,
@@ -137,7 +140,7 @@ impl<'tcx> LateLintPass<'tcx> for LenZero {
         {
             self.check_empty_expr(
                 cx,
-                expr.span,
+                expr,
                 lhs_expr,
                 peel_ref_operators(cx, rhs_expr),
                 if method.ident.name == sym::ne {
@@ -151,27 +154,25 @@ impl<'tcx> LateLintPass<'tcx> for LenZero {
         if let ExprKind::Binary(Spanned { node: cmp, .. }, left, right) = expr.kind
             && !expr.span.from_expansion()
         {
-            // expr.span might contains parenthesis, see issue #10529
-            let actual_span = span_without_enclosing_paren(cx, expr.span);
             match cmp {
                 BinOpKind::Eq => {
-                    self.check_cmp(cx, actual_span, left, right, "", 0); // len == 0
-                    self.check_cmp(cx, actual_span, right, left, "", 0); // 0 == len
+                    self.check_cmp(cx, expr, left, right, "", 0); // len == 0
+                    self.check_cmp(cx, expr, right, left, "", 0); // 0 == len
                 },
                 BinOpKind::Ne => {
-                    self.check_cmp(cx, actual_span, left, right, "!", 0); // len != 0
-                    self.check_cmp(cx, actual_span, right, left, "!", 0); // 0 != len
+                    self.check_cmp(cx, expr, left, right, "!", 0); // len != 0
+                    self.check_cmp(cx, expr, right, left, "!", 0); // 0 != len
                 },
                 BinOpKind::Gt => {
-                    self.check_cmp(cx, actual_span, left, right, "!", 0); // len > 0
-                    self.check_cmp(cx, actual_span, right, left, "", 1); // 1 > len
+                    self.check_cmp(cx, expr, left, right, "!", 0); // len > 0
+                    self.check_cmp(cx, expr, right, left, "", 1); // 1 > len
                 },
                 BinOpKind::Lt => {
-                    self.check_cmp(cx, actual_span, left, right, "", 1); // len < 1
-                    self.check_cmp(cx, actual_span, right, left, "!", 0); // 0 < len
+                    self.check_cmp(cx, expr, left, right, "", 1); // len < 1
+                    self.check_cmp(cx, expr, right, left, "!", 0); // 0 < len
                 },
-                BinOpKind::Ge => self.check_cmp(cx, actual_span, left, right, "!", 1), // len >= 1
-                BinOpKind::Le => self.check_cmp(cx, actual_span, right, left, "!", 1), // 1 <= len
+                BinOpKind::Ge => self.check_cmp(cx, expr, left, right, "!", 1), // len >= 1
+                BinOpKind::Le => self.check_cmp(cx, expr, right, left, "!", 1), // 1 <= len
                 _ => (),
             }
         }
@@ -182,7 +183,7 @@ impl LenZero {
     fn check_cmp(
         &self,
         cx: &LateContext<'_>,
-        span: Span,
+        expr: &Expr<'_>,
         method: &Expr<'_>,
         lit: &Expr<'_>,
         op: &str,
@@ -198,9 +199,17 @@ impl LenZero {
                 return;
             }
 
-            self.check_len(cx, span, method_path.ident.name, receiver, &lit.node, op, compare_to);
+            self.check_len(
+                cx,
+                expr.span,
+                method_path.ident.name,
+                receiver,
+                &lit.node,
+                op,
+                compare_to,
+            );
         } else {
-            self.check_empty_expr(cx, span, method, lit, op);
+            self.check_empty_expr(cx, expr, method, lit, op);
         }
     }
 
@@ -222,6 +231,7 @@ impl LenZero {
             }
 
             if method_name == sym::len && has_is_empty(cx, receiver, self.msrv) {
+                let span = span_without_enclosing_paren(cx, span);
                 let mut applicability = Applicability::MachineApplicable;
                 span_lint_and_sugg(
                     cx,
@@ -231,7 +241,7 @@ impl LenZero {
                     format!("using `{op}is_empty` is clearer and more explicit"),
                     format!(
                         "{op}{}.is_empty()",
-                        snippet_with_context(cx, receiver.span, span.ctxt(), "_", &mut applicability).0,
+                        tracked_snippet_with_context(cx, receiver.span, span.ctxt(), "_", &mut applicability).0,
                     ),
                     applicability,
                 );
@@ -239,12 +249,20 @@ impl LenZero {
         }
     }
 
-    fn check_empty_expr(&self, cx: &LateContext<'_>, span: Span, lit1: &Expr<'_>, lit2: &Expr<'_>, op: &str) {
+    fn check_empty_expr(&self, cx: &LateContext<'_>, expr: &Expr<'_>, lit1: &Expr<'_>, lit2: &Expr<'_>, op: &str) {
         if (is_empty_array(lit2) || is_empty_string(lit2)) && has_is_empty(cx, lit1, self.msrv) {
             let mut applicability = Applicability::MachineApplicable;
 
+            let span = if matches!(expr.kind, ExprKind::Binary(..)) {
+                span_without_enclosing_paren(cx, expr.span)
+            } else {
+                expr.span
+            };
             let lit1 = peel_ref_operators(cx, lit1);
-            let lit_str = Sugg::hir_with_context(cx, lit1, span.ctxt(), "_", &mut applicability).maybe_paren();
+            let lit_str = with_tracked_source(cx, || {
+                Sugg::hir_with_context(cx, lit1, span.ctxt(), "_", &mut applicability)
+            })
+            .maybe_paren();
 
             span_lint_and_sugg(
                 cx,
@@ -259,8 +277,10 @@ impl LenZero {
     }
 }
 
+/// Preserve parentheses around binary comparisons (#10529). Read the source only for
+/// a suggested edit so unrelated comparisons do not depend on the whole source file.
 fn span_without_enclosing_paren(cx: &LateContext<'_>, span: Span) -> Span {
-    let Some(snippet) = span.get_text(cx) else {
+    let Some(snippet) = tracked_text(cx, span) else {
         return span;
     };
     if has_enclosing_paren(snippet) {

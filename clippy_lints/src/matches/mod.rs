@@ -1015,7 +1015,6 @@ impl_lint_pass!(Matches => [
     MANUAL_UNWRAP_OR,
     MANUAL_UNWRAP_OR_DEFAULT,
     MATCH_AS_REF,
-    MATCH_BOOL,
     MATCH_LIKE_MATCHES_MACRO,
     MATCH_OVERLAPPING_ARM,
     MATCH_REF_PATS,
@@ -1034,7 +1033,11 @@ impl_lint_pass!(Matches => [
     WILDCARD_IN_OR_PATTERNS,
 ]);
 
-declare_lint_pass!(RedundantMatches => [NEEDLESS_MATCH, REDUNDANT_PATTERN_MATCHING]);
+declare_lint_pass!(RedundantMatches => [
+    MATCH_BOOL,
+    NEEDLESS_MATCH,
+    REDUNDANT_PATTERN_MATCHING,
+]);
 
 // Keep nested patterns and boolean expressions in the same traversal. The
 // automatic fixer uses their diagnostic order to resolve overlapping edits.
@@ -1052,6 +1055,7 @@ impl<'tcx> LateLintPass<'tcx> for RedundantMatches {
                     redundant_pattern_match::check_matches_true(cx, expr, arm, ex);
                 } else if source == MatchSource::Normal && !expr.span.from_expansion() {
                     redundant_pattern_match::check_match(cx, expr, ex, arms);
+                    match_bool::check(cx, ex, arms, expr);
                     needless_match::check_match(cx, ex, arms, expr);
                 }
             } else if !expr.span.from_expansion()
@@ -1142,7 +1146,6 @@ impl<'tcx> LateLintPass<'tcx> for Matches {
                     }
 
                     single_match::check(cx, ex, arms, expr, has_comments);
-                    match_bool::check(cx, ex, arms, expr);
                     overlapping_arms::check(cx, ex, arms);
                     match_wild_enum::check(cx, ex, arms);
                     match_as_ref::check(cx, ex, arms, expr);
