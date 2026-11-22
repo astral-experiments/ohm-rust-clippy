@@ -45,6 +45,7 @@ audited_passes!((conf: &'static Conf), [
         NeedlessBorrowsForGenericArgs: crate::needless_borrows_for_generic_args::NeedlessBorrowsForGenericArgs<'tcx> = crate::needless_borrows_for_generic_args::NeedlessBorrowsForGenericArgs::new(conf),
         NeedlessPassByValue: crate::needless_pass_by_value::NeedlessPassByValue = crate::needless_pass_by_value::NeedlessPassByValue,
         RedundantClone: crate::redundant_clone::RedundantClone = crate::redundant_clone::RedundantClone,
+        CmpOwned: crate::operators::cmp_owned::CmpOwned = crate::operators::cmp_owned::CmpOwned,
         UnportableVariant: crate::enum_clike::UnportableVariant = crate::enum_clike::UnportableVariant,
         FloatLiteral: crate::float_literal::FloatLiteral = crate::float_literal::FloatLiteral::new(conf),
         UnitReturnExpectingOrd: crate::unit_return_expecting_ord::UnitReturnExpectingOrd = crate::unit_return_expecting_ord::UnitReturnExpectingOrd,
@@ -136,6 +137,7 @@ fn requires_source_input(lint: &'static rustc_lint::Lint) -> bool {
         || std::ptr::eq(lint, crate::comparison_chain::COMPARISON_CHAIN)
         || std::ptr::eq(lint, crate::needless_pass_by_value::NEEDLESS_PASS_BY_VALUE)
         || std::ptr::eq(lint, crate::redundant_clone::REDUNDANT_CLONE)
+        || std::ptr::eq(lint, crate::operators::CMP_OWNED)
         || std::ptr::eq(lint, crate::unnecessary_wraps::UNNECESSARY_WRAPS)
         || std::ptr::eq(
             lint,

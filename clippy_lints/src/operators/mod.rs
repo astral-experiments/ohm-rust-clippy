@@ -1,7 +1,7 @@
 mod absurd_extreme_comparisons;
 mod assign_op_pattern;
 mod bit_mask;
-mod cmp_owned;
+pub(crate) mod cmp_owned;
 mod const_comparisons;
 mod decimal_bitwise_operands;
 mod double_comparison;
@@ -996,7 +996,6 @@ impl_lint_pass!(Operators => [
     ARITHMETIC_SIDE_EFFECTS,
     ASSIGN_OP_PATTERN,
     BAD_BIT_MASK,
-    CMP_OWNED,
     DECIMAL_BITWISE_OPERANDS,
     DOUBLE_COMPARISONS,
     DURATION_SUBSEC,
@@ -1074,7 +1073,6 @@ impl<'tcx> LateLintPass<'tcx> for Operators {
                 float_equality_without_abs::check(cx, e, op.node, lhs, rhs);
                 integer_division::check(cx, e, op.node, lhs, rhs);
                 integer_division_remainder_used::check(cx, op.node, lhs, rhs, e.span);
-                cmp_owned::check(cx, e, op.node, lhs, rhs);
                 float_cmp::check(cx, e, op.node, lhs, rhs);
                 modulo_one::check(cx, e, op.node, rhs);
                 modulo_arithmetic::check(

@@ -406,6 +406,13 @@
     "pass": "RedundantClone"
   },
   {
+    "pass": "CmpOwned",
+    "lints": [
+      "cmp_owned"
+    ],
+    "source": "pub fn cmp(left: String, right: String) -> bool { left.to_owned() == right }"
+  },
+  {
     "pass": "UnnecessaryWraps",
     "lints": [
       "unnecessary_wraps"
