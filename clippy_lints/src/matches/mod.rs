@@ -1033,7 +1033,11 @@ impl_lint_pass!(Matches => [
     WILDCARD_IN_OR_PATTERNS,
 ]);
 
-declare_lint_pass!(RedundantMatches => [MATCH_BOOL, NEEDLESS_MATCH, REDUNDANT_PATTERN_MATCHING]);
+declare_lint_pass!(RedundantMatches => [
+    MATCH_BOOL,
+    NEEDLESS_MATCH,
+    REDUNDANT_PATTERN_MATCHING,
+]);
 
 // Keep nested patterns and boolean expressions in the same traversal. The
 // automatic fixer uses their diagnostic order to resolve overlapping edits.
