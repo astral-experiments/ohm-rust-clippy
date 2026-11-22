@@ -539,6 +539,13 @@ fn source_sensitive_ui_cases_replay_in_an_unchanged_module() {
     for (lint, source) in [
         ("clippy::bool_comparison", include_str!("ui/bool_comparison.rs")),
         ("clippy::needless_match", include_str!("ui/needless_match.rs")),
+        ("clippy::match_bool", include_str!("ui/match_bool.rs")),
+        ("clippy::len_zero", include_str!("ui/len_zero.rs")),
+        ("clippy::comparison_to_empty", include_str!("ui/comparison_to_empty.rs")),
+        (
+            "clippy::manual_ignore_case_cmp",
+            include_str!("ui/manual_ignore_case_cmp.rs"),
+        ),
         (
             "clippy::needless_bool",
             include_str!("ui/needless_bool/early_return.rs"),
@@ -657,6 +664,26 @@ fn overlapping_suggestions_keep_their_order() {
             "pub fn f(x: bool) -> bool { if let true = x == false { false } else { true } }\n",
         ),
         (
+            "clippy::redundant_pattern_matching",
+            "clippy::comparison_to_empty",
+            "pub fn f(s: &str) -> bool { !matches!(s != \"\", true) }\n",
+        ),
+        (
+            "clippy::redundant_pattern_matching",
+            "clippy::len_zero",
+            "pub fn f(s: &str) -> bool { !matches!(s.len() != 0, true) }\n",
+        ),
+        (
+            "clippy::needless_match",
+            "clippy::manual_ignore_case_cmp",
+            "pub fn f(s: &str) -> bool { match s.to_ascii_lowercase() == \"a\" { true => true, false => false } }\n",
+        ),
+        (
+            "clippy::match_bool",
+            "clippy::needless_match",
+            "pub fn f(n: u8) -> bool { (match n != 0 { true => true, false => false }) && true }\n",
+        ),
+        (
             "clippy::redundant_clone",
             "clippy::cmp_owned",
             "pub fn cmp(left: String, right: String) -> bool { left.to_owned() == right }\n",
@@ -667,9 +694,12 @@ fn overlapping_suggestions_keep_their_order() {
             fixture.lints = vec![first.into(), second.into()];
             fixture.write("lib.rs", source);
             let (expected, _) = fixture.run(None, None);
-            for lint in &fixture.lints {
-                assert_eq!(count(&expected, lint), 1, "{lint}");
-            }
+            let emitted: Vec<_> = expected
+                .iter()
+                .filter_map(|d| d["code"]["code"].as_str())
+                .filter(|&lint| lint == first || lint == second)
+                .collect();
+            assert_eq!(emitted, [first, second]);
 
             // Automatic fixes prefer the last suggestion when the edits overlap.
             for state in ["not-loaded", "loaded"] {
@@ -737,6 +767,50 @@ fn identity_matches_track_suppressed_suggestions() {
         fixture.check_counts(&[(lint, 0)], "loaded");
         fixture.replace("first.rs", "/*hide*/", "        ");
         fixture.check_counts(&[(lint, 1)], "loaded");
+    }
+}
+
+#[test]
+#[cfg(ohm_source_file_hash)]
+fn comparison_suggestions_track_source_and_available_methods() {
+    for threads in [1, 4] {
+        let mut fixture = Fixture::new(threads);
+        let lints = [
+            "clippy::comparison_to_empty",
+            "clippy::manual_ignore_case_cmp",
+            "clippy::match_bool",
+            "clippy::len_zero",
+        ];
+        fixture.lints = lints.into_iter().map(String::from).collect();
+        fixture.whole_crate_reference = true;
+        fixture.expect_source_input = true;
+        fixture.write(
+            "lib.rs",
+            &format!("#![warn({})]\npub mod value; pub mod first;\n", lints.join(", ")),
+        );
+        fixture.write(
+            "value.rs",
+            "pub struct Buffer; impl Buffer { pub fn len(&self) -> usize { 0 } pub fn is_empty(&self) -> bool { true } }\n",
+        );
+        fixture.write(
+            "first.rs",
+            r#"
+fn text() -> &'static str { "x" }
+fn buf() -> crate::value::Buffer { crate::value::Buffer }
+pub fn empty() -> bool { text(/*old*/) == "" }
+pub fn equal() -> bool { text(/*old*/).to_ascii_lowercase() == "a" }
+pub fn select() -> u8 { match text(/*old*/).is_empty() { true => 1, false => 2 } }
+pub fn zero() -> bool { buf(/*old*/).len() == 0 }
+"#,
+        );
+        let expected = lints.map(|lint| (lint, 1));
+        fixture.check_counts(&expected, "not-loaded");
+        fixture.replace("first.rs", "/*old*/", "/*new*/");
+        fixture.check_counts(&expected, "loaded");
+        fixture.replace("value.rs", "is_empty", "is_clear");
+        fixture.check_counts(&[("clippy::len_zero", 0)], "loaded");
+        fixture.replace("value.rs", "is_clear", "is_empty");
+        fixture.check_counts(&expected, "loaded");
     }
 }
 

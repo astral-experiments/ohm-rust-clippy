@@ -41,6 +41,7 @@ audited_passes!((conf: &'static Conf), [
         // These passes can suggest competing edits to the same expression. Preserve their whole-crate order.
         NeedlessBool: crate::needless_bool::NeedlessBool = crate::needless_bool::NeedlessBool,
         BoolComparison: crate::bool_comparison::BoolComparison = crate::bool_comparison::BoolComparison,
+        LenZero: crate::len_zero::LenZero = crate::len_zero::LenZero::new(conf),
         RedundantMatches: crate::matches::RedundantMatches = crate::matches::RedundantMatches,
         PatternEquality: crate::equatable_if_let::PatternEquality = crate::equatable_if_let::PatternEquality,
         ComparisonChain: crate::comparison_chain::ComparisonChain = crate::comparison_chain::ComparisonChain,
@@ -49,6 +50,7 @@ audited_passes!((conf: &'static Conf), [
         NeedlessPassByValue: crate::needless_pass_by_value::NeedlessPassByValue = crate::needless_pass_by_value::NeedlessPassByValue,
         RedundantClone: crate::redundant_clone::RedundantClone = crate::redundant_clone::RedundantClone,
         CmpOwned: crate::operators::cmp_owned::CmpOwned = crate::operators::cmp_owned::CmpOwned,
+        ManualIgnoreCaseCmp: crate::manual_ignore_case_cmp::ManualIgnoreCaseCmp = crate::manual_ignore_case_cmp::ManualIgnoreCaseCmp,
         UnportableVariant: crate::enum_clike::UnportableVariant = crate::enum_clike::UnportableVariant,
         FloatLiteral: crate::float_literal::FloatLiteral = crate::float_literal::FloatLiteral::new(conf),
         UnitReturnExpectingOrd: crate::unit_return_expecting_ord::UnitReturnExpectingOrd = crate::unit_return_expecting_ord::UnitReturnExpectingOrd,
@@ -140,6 +142,10 @@ fn requires_source_input(lint: &'static rustc_lint::Lint) -> bool {
         || std::ptr::eq(lint, crate::needless_bool::NEEDLESS_BOOL_ASSIGN)
         || std::ptr::eq(lint, crate::matches::REDUNDANT_PATTERN_MATCHING)
         || std::ptr::eq(lint, crate::matches::NEEDLESS_MATCH)
+        || std::ptr::eq(lint, crate::matches::MATCH_BOOL)
+        || std::ptr::eq(lint, crate::len_zero::COMPARISON_TO_EMPTY)
+        || std::ptr::eq(lint, crate::len_zero::LEN_ZERO)
+        || std::ptr::eq(lint, crate::manual_ignore_case_cmp::MANUAL_IGNORE_CASE_CMP)
         || std::ptr::eq(lint, crate::equatable_if_let::EQUATABLE_IF_LET)
         || std::ptr::eq(lint, crate::bool_comparison::BOOL_COMPARISON)
         || std::ptr::eq(lint, crate::comparison_chain::COMPARISON_CHAIN)

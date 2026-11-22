@@ -17,6 +17,7 @@ pub(crate) fn check(cx: &LateContext<'_>, scrutinee: &Expr<'_>, arms: &[Arm<'_>]
             .iter()
             .all(|arm| arm.pat.walk_short(|p| !matches!(p.kind, PatKind::Binding(..))))
         && arms.len() == 2
+        && super::has_complete_match_source(cx, expr, scrutinee, arms)
     {
         span_lint_and_then(
             cx,

@@ -25,10 +25,26 @@
   {
     "pass": "RedundantMatches",
     "lints": [
+      "match_bool",
       "needless_match",
       "redundant_pattern_matching"
     ],
     "source": "pub fn f(x: bool) -> bool { matches!(match x { true => true, false => false }, true) }"
+  },
+  {
+    "pass": "LenZero",
+    "lints": [
+      "comparison_to_empty",
+      "len_zero"
+    ],
+    "source": "pub fn f(s: &str) -> (bool, bool) { (s == \"\", s.len() == 0) }"
+  },
+  {
+    "pass": "ManualIgnoreCaseCmp",
+    "lints": [
+      "manual_ignore_case_cmp"
+    ],
+    "source": "pub fn f(s: &str) -> bool { s.to_ascii_lowercase() == \"a\" }"
   },
   {
     "pass": "PatternEquality",
