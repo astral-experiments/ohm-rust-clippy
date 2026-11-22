@@ -1,6 +1,6 @@
 use clippy_utils::diagnostics::span_lint_and_then;
 use clippy_utils::is_in_const_context;
-use clippy_utils::source::snippet_with_context;
+use clippy_utils::source::tracked_snippet_with_context;
 use clippy_utils::ty::implements_trait;
 use rustc_errors::Applicability;
 use rustc_hir::{Expr, ExprKind, Pat, PatKind};
@@ -131,7 +131,7 @@ impl<'tcx> LateLintPass<'tcx> for PatternEquality {
                     "this pattern matching can be expressed using equality",
                     |diag| {
                         let pat_str = {
-                            let str = snippet_with_context(cx, let_expr.pat.span, ctxt, "..", &mut app).0;
+                            let str = tracked_snippet_with_context(cx, let_expr.pat.span, ctxt, "..", &mut app).0;
                             if let PatKind::Struct(..) = let_expr.pat.kind {
                                 format!("({str})").into()
                             } else {
@@ -141,7 +141,7 @@ impl<'tcx> LateLintPass<'tcx> for PatternEquality {
 
                         let sugg = format!(
                             "{} == {pat_str}",
-                            snippet_with_context(cx, let_expr.init.span, ctxt, "..", &mut app).0,
+                            tracked_snippet_with_context(cx, let_expr.init.span, ctxt, "..", &mut app).0,
                         );
                         diag.span_suggestion(expr.span, "try", sugg, app);
                     },
@@ -155,8 +155,8 @@ impl<'tcx> LateLintPass<'tcx> for PatternEquality {
                     |diag| {
                         let sugg = format!(
                             "matches!({}, {})",
-                            snippet_with_context(cx, let_expr.init.span, ctxt, "..", &mut app).0,
-                            snippet_with_context(cx, let_expr.pat.span, ctxt, "..", &mut app).0,
+                            tracked_snippet_with_context(cx, let_expr.init.span, ctxt, "..", &mut app).0,
+                            tracked_snippet_with_context(cx, let_expr.pat.span, ctxt, "..", &mut app).0,
                         );
                         diag.span_suggestion(expr.span, "try", sugg, app);
                     },
