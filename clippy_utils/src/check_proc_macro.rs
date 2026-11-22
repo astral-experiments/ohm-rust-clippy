@@ -54,6 +54,7 @@ pub enum Pat {
 /// if the span crosses multiple files or if source is not available.
 fn span_matches_pat(sess: &Session, span: Span, start_pat: Pat, end_pat: Pat) -> bool {
     let pos = sess.source_map().lookup_byte_offset(span.lo());
+    crate::source::record_source_read(&pos.sf);
     let Some(ref src) = pos.sf.src else {
         return false;
     };

@@ -1082,9 +1082,7 @@ impl<'tcx> LateLintPass<'tcx> for RedundantMatches {
 }
 
 /// Only repeat the whole-crate source checks for a candidate simplification.
-/// The span filter reads raw source even when it suppresses a diagnostic.
 fn has_complete_match_source(cx: &LateContext<'_>, expr: &Expr<'_>, ex: &Expr<'_>, arms: &[Arm<'_>]) -> bool {
-    clippy_utils::source::track_span_source(cx, expr.span);
     is_span_match(cx, expr.span) && match_comments(cx, expr.span, ex.span, arms).is_some()
 }
 
