@@ -652,6 +652,11 @@ fn overlapping_suggestions_keep_their_order() {
             "pub fn f(n: u8) -> bool { if let false = (match n == 1 { true => true, false => false }) { true } else { false } }\n",
         ),
         (
+            "clippy::equatable_if_let",
+            "clippy::bool_comparison",
+            "pub fn f(x: bool) -> bool { if let true = x == false { false } else { true } }\n",
+        ),
+        (
             "clippy::redundant_clone",
             "clippy::cmp_owned",
             "pub fn cmp(left: String, right: String) -> bool { left.to_owned() == right }\n",
@@ -731,6 +736,31 @@ fn identity_matches_track_suppressed_suggestions() {
         );
         fixture.check_counts(&[(lint, 0)], "loaded");
         fixture.replace("first.rs", "/*hide*/", "        ");
+        fixture.check_counts(&[(lint, 1)], "loaded");
+    }
+}
+
+#[test]
+#[cfg(ohm_source_file_hash)]
+fn if_let_suggestions_track_pattern_and_scrutinee_text() {
+    for threads in [1, 4] {
+        let mut fixture = Fixture::new(threads);
+        let lint = "clippy::equatable_if_let";
+        fixture.lints = vec![lint.into()];
+        fixture.whole_crate_reference = true;
+        fixture.expect_source_input = true;
+        fixture.write("lib.rs", "#![warn(clippy::equatable_if_let)]\npub mod first;\n");
+        fixture.write(
+            "first.rs",
+            "pub fn f(x: u8) -> bool { if let Some(/* PAT */ 1) = Some(/* VAL */ x) { true } else { false } }\n",
+        );
+        fixture.check_counts(&[(lint, 1)], "not-loaded");
+        fixture.replace("first.rs", "/* PAT */", "/* NEW */");
+        fixture.check_counts(&[(lint, 1)], "loaded");
+        // The const context requires a matches! suggestion instead of equality.
+        fixture.replace("first.rs", "pub fn", "pub const fn");
+        fixture.check_counts(&[(lint, 1)], "loaded");
+        fixture.replace("first.rs", "/* VAL */", "/* ALT */");
         fixture.check_counts(&[(lint, 1)], "loaded");
     }
 }

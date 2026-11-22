@@ -31,6 +31,13 @@
     "source": "pub fn f(x: bool) -> bool { matches!(match x { true => true, false => false }, true) }"
   },
   {
+    "pass": "PatternEquality",
+    "lints": [
+      "equatable_if_let"
+    ],
+    "source": "pub fn f(x: u8) -> bool { if let Some(1) = Some(x) { true } else { false } }"
+  },
+  {
     "pass": "ComparisonChain",
     "lints": [
       "comparison_chain"
