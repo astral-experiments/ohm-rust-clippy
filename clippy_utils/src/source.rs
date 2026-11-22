@@ -55,6 +55,13 @@ fn track_observed_file(file: &SourceFile) {
     });
 }
 
+/// Record a raw source-map read inside a tracked module lint, even if it yields no snippet.
+pub(crate) fn record_source_read(file: &SourceFile) {
+    if RECORD_SNIPPETS.get() {
+        track_observed_file(file);
+    }
+}
+
 /// Record the source files used by a source-sensitive lint, including failed snippet reads.
 ///
 /// Only audited module passes use this hook. Whole-crate passes need no dependency.
@@ -844,9 +851,7 @@ pub fn walk_span_to_context(span: Span, outer: SyntaxContext) -> Option<Span> {
 pub fn trim_span(sm: &SourceMap, span: Span) -> Span {
     let data = span.data();
     let sf: &_ = &sm.lookup_source_file(data.lo);
-    if RECORD_SNIPPETS.get() {
-        track_observed_file(sf);
-    }
+    record_source_read(sf);
     let Some(src) = sf.src.as_deref() else {
         return span;
     };

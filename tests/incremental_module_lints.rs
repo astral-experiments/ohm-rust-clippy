@@ -767,6 +767,28 @@ fn if_let_suggestions_track_pattern_and_scrutinee_text() {
 
 #[test]
 #[cfg(ohm_source_file_hash)]
+fn unit_arg_tracks_source_when_the_macro_filter_suppresses_the_lint() {
+    for threads in [1, 4] {
+        let mut fixture = Fixture::new(threads);
+        let lint = "clippy::unit_arg";
+        fixture.lints = vec![lint.into()];
+        fixture.whole_crate_reference = true;
+        fixture.write("lib.rs", "#![warn(clippy::unit_arg)]\npub mod first;\n");
+        fixture.write(
+            "first.rs",
+            "fn consume(_: ()) {}\nfn mark() {}\npub fn run() { consume(mark(/*hide*/)); }\n",
+        );
+        // The comment masks the call's final opening parenthesis from the macro filter.
+        fixture.check_counts(&[(lint, 0)], "not-loaded");
+        fixture.replace("first.rs", "/*hide*/", "        ");
+        fixture.check_counts(&[(lint, 1)], "loaded");
+        fixture.replace("first.rs", "        ", "/*hide*/");
+        fixture.check_counts(&[(lint, 0)], "loaded");
+    }
+}
+
+#[test]
+#[cfg(ohm_source_file_hash)]
 fn boolean_suggestions_observe_source_and_sibling_types() {
     for threads in [1, 4] {
         let mut fixture = Fixture::new(threads);
