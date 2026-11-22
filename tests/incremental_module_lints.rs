@@ -538,6 +538,19 @@ fn configuration_changes_affect_cached_lints() {
 fn source_sensitive_ui_cases_replay_in_an_unchanged_module() {
     for (lint, source) in [
         ("clippy::bool_comparison", include_str!("ui/bool_comparison.rs")),
+        ("clippy::needless_match", include_str!("ui/needless_match.rs")),
+        (
+            "clippy::needless_bool",
+            include_str!("ui/needless_bool/early_return.rs"),
+        ),
+        (
+            "clippy::needless_bool_assign",
+            include_str!("ui/needless_bool_assign.rs"),
+        ),
+        (
+            "clippy::redundant_pattern_matching",
+            include_str!("ui/redundant_pattern_matching_option.rs"),
+        ),
         (
             "clippy::cmp_owned",
             concat!(
@@ -619,6 +632,26 @@ fn overlapping_suggestions_keep_their_order() {
             "pub fn f(x: bool) -> bool { !x != true }\n",
         ),
         (
+            "clippy::bool_comparison",
+            "clippy::redundant_pattern_matching",
+            "#[warn(clippy::needless_bool)]\npub fn f(x: bool) -> bool { (matches!(if x { false } else { true }, true)) == false }\n",
+        ),
+        (
+            "clippy::bool_comparison",
+            "clippy::needless_bool",
+            "pub fn f(x: bool) -> bool { (if x { false } else { true }) == false }\n",
+        ),
+        (
+            "clippy::redundant_pattern_matching",
+            "clippy::needless_match",
+            "pub fn f(n: u8) -> bool { matches!(match n == 1 { true => true, false => false }, false) }\n",
+        ),
+        (
+            "clippy::redundant_pattern_matching",
+            "clippy::needless_match",
+            "pub fn f(n: u8) -> bool { if let false = (match n == 1 { true => true, false => false }) { true } else { false } }\n",
+        ),
+        (
             "clippy::redundant_clone",
             "clippy::cmp_owned",
             "pub fn cmp(left: String, right: String) -> bool { left.to_owned() == right }\n",
@@ -639,6 +672,66 @@ fn overlapping_suggestions_keep_their_order() {
                 assert_eq!(diagnostics, expected);
             }
         }
+    }
+}
+
+#[test]
+#[cfg(ohm_source_file_hash)]
+fn nested_boolean_suggestions_track_comments() {
+    for threads in [1, 4] {
+        let mut fixture = Fixture::new(threads);
+        let patterns = "clippy::redundant_pattern_matching";
+        let needless = "clippy::needless_bool";
+        fixture.lints = vec![patterns.into(), needless.into()];
+        fixture.whole_crate_reference = true;
+        fixture.expect_source_input = true;
+        fixture.write(
+            "lib.rs",
+            "#![warn(clippy::redundant_pattern_matching, clippy::needless_bool)]\npub mod first; pub mod second;\n",
+        );
+        // Both forms of redundant pattern matching must still emit exactly once.
+        fixture.write(
+            "first.rs",
+            "pub fn f(x: bool, y: bool) -> bool { matches!(x /* ONE */ && y, true) }\npub fn g(x: Option<()>) { if let Some(_) = x {} }\n",
+        );
+        fixture.write(
+            "second.rs",
+            "pub fn f(x: bool) -> bool { if x { false } else { /*keep*/ true } }\n",
+        );
+        fixture.check_counts(&[(patterns, 2), (needless, 0)], "not-loaded");
+        fixture.replace("first.rs", "/* ONE */", "/* TWO */");
+        fixture.check_counts(&[(patterns, 2), (needless, 0)], "loaded");
+        fixture.replace("second.rs", "/*keep*/", "        ");
+        fixture.check_counts(&[(patterns, 2), (needless, 1)], "loaded");
+    }
+}
+
+#[test]
+#[cfg(ohm_source_file_hash)]
+fn identity_matches_track_suppressed_suggestions() {
+    for threads in [1, 4] {
+        let mut fixture = Fixture::new(threads);
+        let lint = "clippy::needless_match";
+        fixture.lints = vec![lint.into()];
+        fixture.whole_crate_reference = true;
+        fixture.expect_source_input = true;
+        fixture.write("lib.rs", "#![warn(clippy::needless_match)]\npub mod first;\n");
+        fixture.write(
+            "first.rs",
+            "pub fn f(n: u8) -> bool { match n /* ONE */ == 1 { #[cfg(all())] true => true, false => false } }\n",
+        );
+        fixture.check_counts(&[(lint, 0)], "not-loaded");
+        fixture.replace("first.rs", "#[cfg(all())]", "             ");
+        fixture.check_counts(&[(lint, 1)], "loaded");
+        fixture.replace("first.rs", "/* ONE */", "/* TWO */");
+        fixture.check_counts(&[(lint, 1)], "loaded");
+        fixture.write(
+            "first.rs",
+            "pub fn f(n: u8) -> bool { (/*hide*/ match n == 1 { true => true, false => false }) }\n",
+        );
+        fixture.check_counts(&[(lint, 0)], "loaded");
+        fixture.replace("first.rs", "/*hide*/", "        ");
+        fixture.check_counts(&[(lint, 1)], "loaded");
     }
 }
 

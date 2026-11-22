@@ -39,7 +39,9 @@ audited_passes!((conf: &'static Conf), [
         UnitExpressions: crate::unit_types::UnitExpressions = crate::unit_types::UnitExpressions,
         NonminimalBool: crate::booleans::NonminimalBool = crate::booleans::NonminimalBool::new(conf),
         // These passes can suggest competing edits to the same expression. Preserve their whole-crate order.
+        NeedlessBool: crate::needless_bool::NeedlessBool = crate::needless_bool::NeedlessBool,
         BoolComparison: crate::bool_comparison::BoolComparison = crate::bool_comparison::BoolComparison,
+        RedundantMatches: crate::matches::RedundantMatches = crate::matches::RedundantMatches,
         ComparisonChain: crate::comparison_chain::ComparisonChain = crate::comparison_chain::ComparisonChain,
         UnnecessaryWraps: crate::unnecessary_wraps::UnnecessaryWraps = crate::unnecessary_wraps::UnnecessaryWraps::new(conf),
         NeedlessBorrowsForGenericArgs: crate::needless_borrows_for_generic_args::NeedlessBorrowsForGenericArgs<'tcx> = crate::needless_borrows_for_generic_args::NeedlessBorrowsForGenericArgs::new(conf),
@@ -133,6 +135,10 @@ fn requires_source_input(lint: &'static rustc_lint::Lint) -> bool {
     }
     std::ptr::eq(lint, crate::booleans::NONMINIMAL_BOOL)
         || std::ptr::eq(lint, crate::booleans::OVERLY_COMPLEX_BOOL_EXPR)
+        || std::ptr::eq(lint, crate::needless_bool::NEEDLESS_BOOL)
+        || std::ptr::eq(lint, crate::needless_bool::NEEDLESS_BOOL_ASSIGN)
+        || std::ptr::eq(lint, crate::matches::REDUNDANT_PATTERN_MATCHING)
+        || std::ptr::eq(lint, crate::matches::NEEDLESS_MATCH)
         || std::ptr::eq(lint, crate::bool_comparison::BOOL_COMPARISON)
         || std::ptr::eq(lint, crate::comparison_chain::COMPARISON_CHAIN)
         || std::ptr::eq(lint, crate::needless_pass_by_value::NEEDLESS_PASS_BY_VALUE)

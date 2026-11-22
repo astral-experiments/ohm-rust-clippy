@@ -15,6 +15,22 @@
     "source": "pub fn cmp(x: bool) -> bool { x == true }"
   },
   {
+    "pass": "NeedlessBool",
+    "lints": [
+      "needless_bool",
+      "needless_bool_assign"
+    ],
+    "source": "pub fn f(x: bool) -> bool { if x { false } else { true } } pub fn assign(x: bool, y: &mut bool) { if x { *y = true } else { *y = false } }"
+  },
+  {
+    "pass": "RedundantMatches",
+    "lints": [
+      "needless_match",
+      "redundant_pattern_matching"
+    ],
+    "source": "pub fn f(x: bool) -> bool { matches!(match x { true => true, false => false }, true) }"
+  },
+  {
     "pass": "ComparisonChain",
     "lints": [
       "comparison_chain"
