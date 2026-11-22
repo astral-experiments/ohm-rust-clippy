@@ -1182,45 +1182,29 @@ impl<'tcx> LateLintPass<'tcx> for Matches {
                 self.msrv,
             );
             significant_drop_in_scrutinee::check_if_let(cx, expr, if_let.let_expr, if_let.if_then, if_let.if_else);
-            if !from_expansion {
-                if let Some(else_expr) = if_let.if_else {
-                    if self.msrv.meets(cx, msrvs::MATCHES_MACRO) {
-                        match_like_matches::check_if_let(
-                            cx,
-                            expr,
-                            if_let.let_pat,
-                            if_let.let_expr,
-                            if_let.if_then,
-                            else_expr,
-                        );
-                    }
-                    if !is_in_const_context(cx) {
-                        manual_unwrap_or::check_if_let(
-                            cx,
-                            expr,
-                            if_let.let_pat,
-                            if_let.let_expr,
-                            if_let.if_then,
-                            else_expr,
-                        );
-                        manual_map::check_if_let(cx, expr, if_let.let_pat, if_let.let_expr, if_let.if_then, else_expr);
-                        manual_filter::check_if_let(
-                            cx,
-                            expr,
-                            if_let.let_pat,
-                            if_let.let_expr,
-                            if_let.if_then,
-                            else_expr,
-                        );
-                        manual_ok_err::check_if_let(
-                            cx,
-                            expr,
-                            if_let.let_pat,
-                            if_let.let_expr,
-                            if_let.if_then,
-                            else_expr,
-                        );
-                    }
+            if !from_expansion && let Some(else_expr) = if_let.if_else {
+                if self.msrv.meets(cx, msrvs::MATCHES_MACRO) {
+                    match_like_matches::check_if_let(
+                        cx,
+                        expr,
+                        if_let.let_pat,
+                        if_let.let_expr,
+                        if_let.if_then,
+                        else_expr,
+                    );
+                }
+                if !is_in_const_context(cx) {
+                    manual_unwrap_or::check_if_let(
+                        cx,
+                        expr,
+                        if_let.let_pat,
+                        if_let.let_expr,
+                        if_let.if_then,
+                        else_expr,
+                    );
+                    manual_map::check_if_let(cx, expr, if_let.let_pat, if_let.let_expr, if_let.if_then, else_expr);
+                    manual_filter::check_if_let(cx, expr, if_let.let_pat, if_let.let_expr, if_let.if_then, else_expr);
+                    manual_ok_err::check_if_let(cx, expr, if_let.let_pat, if_let.let_expr, if_let.if_then, else_expr);
                 }
             }
         } else if let Some(while_let) = higher::WhileLet::hir(expr)
