@@ -1006,6 +1006,23 @@ declare_clippy_lint! {
     "a wildcard pattern used with others patterns in same match arm"
 }
 
+// Keep suggestions for matches! in the same traversal as surrounding boolean expressions.
+rustc_lint::declare_lint_pass!(RedundantMatches => [REDUNDANT_PATTERN_MATCHING]);
+
+impl<'tcx> LateLintPass<'tcx> for RedundantMatches {
+    fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx Expr<'_>) {
+        if let ExprKind::Match(ex, arms, _) = expr.kind
+            && let [arm, _] = arms
+            && is_direct_expn_of(expr.span, sym::matches).is_some()
+        {
+            clippy_utils::source::with_tracked_source(cx, || {
+                redundant_pattern_match::check_match(cx, expr, ex, arms);
+                redundant_pattern_match::check_matches_true(cx, expr, arm, ex);
+            });
+        }
+    }
+}
+
 impl_lint_pass!(Matches => [
     COLLAPSIBLE_MATCH,
     INFALLIBLE_DESTRUCTURING_MATCH,
@@ -1056,12 +1073,6 @@ impl<'tcx> LateLintPass<'tcx> for Matches {
         let from_expansion = expr.span.from_expansion();
 
         if let ExprKind::Match(ex, arms, source) = expr.kind {
-            if is_direct_expn_of(expr.span, sym::matches).is_some()
-                && let [arm, _] = arms
-            {
-                redundant_pattern_match::check_match(cx, expr, ex, arms);
-                redundant_pattern_match::check_matches_true(cx, expr, arm, ex);
-            }
             if expr.span.in_external_macro(cx.tcx.sess.source_map()) {
                 return;
             }

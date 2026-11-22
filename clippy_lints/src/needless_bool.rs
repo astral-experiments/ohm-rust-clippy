@@ -1,5 +1,5 @@
 use clippy_utils::diagnostics::{span_lint, span_lint_and_sugg, span_lint_and_then};
-use clippy_utils::source::snippet_with_context;
+use clippy_utils::source::{snippet_with_context, with_tracked_source};
 use clippy_utils::sugg::Sugg;
 use clippy_utils::{
     SpanlessEq, get_parent_expr, higher, is_block_like, is_else_clause, is_parent_stmt, is_receiver_of_method_call,
@@ -123,13 +123,27 @@ fn condition_needs_parentheses(e: &Expr<'_>) -> bool {
 
 impl<'tcx> LateLintPass<'tcx> for NeedlessBool {
     fn check_expr(&mut self, cx: &LateContext<'tcx>, e: &'tcx Expr<'_>) {
+        if matches!(e.kind, ExprKind::If(..)) && !e.span.from_expansion() {
+            with_tracked_source(cx, || Self::check_if(cx, e));
+        }
+    }
+
+    fn check_block(&mut self, cx: &LateContext<'tcx>, block: &'tcx Block<'tcx>) {
+        if block.expr.is_some() && !block.stmts.is_empty() {
+            with_tracked_source(cx, || Self::check_early_return(cx, block));
+        }
+    }
+}
+
+impl NeedlessBool {
+    /// Checks whether both branches return or assign boolean literals.
+    fn check_if<'tcx>(cx: &LateContext<'tcx>, e: &'tcx Expr<'_>) {
         use self::Expression::{Bool, RetBool};
-        if !e.span.from_expansion()
-            && let Some(higher::If {
-                cond,
-                then,
-                r#else: Some(else_expr),
-            }) = higher::If::hir(e)
+        if let Some(higher::If {
+            cond,
+            then,
+            r#else: Some(else_expr),
+        }) = higher::If::hir(e)
             && !span_contains_comment(cx, e.span)
         {
             let reduce = |ret, not| {
@@ -220,7 +234,8 @@ impl<'tcx> LateLintPass<'tcx> for NeedlessBool {
         }
     }
 
-    fn check_block(&mut self, cx: &LateContext<'tcx>, block: &'tcx Block<'tcx>) {
+    /// Checks whether a guard and the trailing expression return opposite booleans.
+    fn check_early_return<'tcx>(cx: &LateContext<'tcx>, block: &'tcx Block<'tcx>) {
         // Detect the early-return form:
         //     if c {
         //         return Ok(true);
