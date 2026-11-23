@@ -1,13 +1,15 @@
 use clippy_utils::diagnostics::span_lint_and_then;
 use clippy_utils::res::{MaybeDef as _, MaybeQPath as _};
+use clippy_utils::source::SpanExt as _;
+use clippy_utils::sugg::has_enclosing_paren;
 use clippy_utils::{get_parent_expr, is_none_expr, last_path_segment, sym};
-use rustc_ast::util::parser::ExprPrecedence;
+use rustc_ast::util::parser::{ExprPrecedence, needs_par_as_let_scrutinee};
 use rustc_errors::Applicability;
 use rustc_hir::{self as hir, AmbigArg};
 use rustc_lint::LateContext;
 use rustc_middle::ty;
 use rustc_middle::ty::print::with_forced_trimmed_paths;
-use rustc_span::Symbol;
+use rustc_span::{DesugaringKind, Span, Symbol};
 
 use super::UNNECESSARY_LITERAL_UNWRAP;
 
@@ -24,7 +26,77 @@ fn get_ty_from_args<'a>(args: Option<&'a [hir::GenericArg<'a>]>, index: usize) -
     }
 }
 
-#[expect(clippy::too_many_lines)]
+/// Group exposed struct literals and jumps before a block. Parentheses around the entire
+/// expression can trigger `unused_parens` if a literal is followed by `.await` or `?`.
+fn group_before_block(cx: &LateContext<'_>, value: &hir::Expr<'_>, edits: &mut Vec<(Span, String)>) {
+    use hir::ExprKind as E;
+
+    if value.span.with_source_text(cx, |s| has_enclosing_paren(s)) == Some(true) {
+        return;
+    }
+    match value.kind {
+        E::Struct(..) | E::Ret(..) | E::Break(..) | E::Yield(..) if !value.span.from_expansion() => {
+            edits.push((value.span.shrink_to_lo(), "(".to_owned()));
+            edits.push((value.span.shrink_to_hi(), ")".to_owned()));
+        },
+        E::Binary(_, lhs, rhs) | E::Assign(lhs, rhs, _) | E::AssignOp(_, lhs, rhs) => {
+            group_before_block(cx, lhs, edits);
+            group_before_block(cx, rhs, edits);
+        },
+        E::Match(call, _, hir::MatchSource::AwaitDesugar | hir::MatchSource::TryDesugar(_)) => {
+            if let E::Call(_, [operand]) = call.kind {
+                group_before_block(cx, operand, edits);
+            }
+        },
+        E::Unary(_, base)
+        | E::AddrOf(_, _, base)
+        | E::Cast(base, _)
+        | E::Field(base, _)
+        | E::Index(base, ..)
+        | E::Call(base, _)
+        | E::MethodCall(_, base, ..) => group_before_block(cx, base, edits),
+        _ => {},
+    }
+}
+
+/// Remove the wrapper, preserving both the grammar before blocks and operator precedence.
+fn remove_unwrap(cx: &LateContext<'_>, expr: &hir::Expr<'_>, value: &hir::Expr<'_>) -> Vec<(Span, String)> {
+    use hir::ExprKind as E;
+
+    let mut edits = vec![
+        (expr.span.with_hi(value.span.lo()), String::new()),
+        (expr.span.with_lo(value.span.hi()), String::new()),
+    ];
+    let Some(parent) = get_parent_expr(cx, expr) else {
+        return edits;
+    };
+    let precedence = cx.precedence(value);
+    let group = match parent.kind {
+        E::Let(..) if needs_par_as_let_scrutinee(precedence) => true,
+        E::Call(..) if parent.span.is_desugaring(DesugaringKind::ForLoop) => {
+            group_before_block(cx, value, &mut edits);
+            false
+        },
+        E::Let(..) | E::If(..) | E::DropTemps(..) | E::Match(_, _, hir::MatchSource::Normal) => {
+            group_before_block(cx, value, &mut edits);
+            false
+        },
+        _ if precedence >= ExprPrecedence::Unambiguous || precedence > cx.precedence(parent) => false,
+        // Arguments and indices have delimiters. A desugared call may instead represent a
+        // postfix operator such as `?`, whose operand still needs grouping.
+        E::Call(base, _) | E::MethodCall(_, base, ..) | E::Index(base, ..) => {
+            base.hir_id == expr.hir_id || parent.span.desugaring_kind().is_some()
+        },
+        E::Tup(..) | E::Array(..) | E::Repeat(..) => false,
+        _ => true,
+    };
+    if group {
+        edits[0].1.push('(');
+        edits[1].1.push(')');
+    }
+    edits
+}
+
 pub(super) fn check(
     cx: &LateContext<'_>,
     expr: &hir::Expr<'_>,
@@ -126,22 +198,7 @@ pub(super) fn check(
                 ),
                 (call_args[0].span.with_lo(args[0].span.lo()), ", ".to_string()),
             ]),
-            (_, _, None) => {
-                // Preserve grouping when the surrounding operator binds at least as tightly.
-                let precedence = cx.precedence(&call_args[0]);
-                let (open, close) = if precedence < ExprPrecedence::Unambiguous
-                    && let Some(parent) = get_parent_expr(cx, expr)
-                    && precedence <= cx.precedence(parent)
-                {
-                    ("(", ")")
-                } else {
-                    ("", "")
-                };
-                Some(vec![
-                    (expr.span.with_hi(call_args[0].span.lo()), open.to_owned()),
-                    (expr.span.with_lo(call_args[0].span.hi()), close.to_owned()),
-                ])
-            },
+            (_, _, None) => Some(remove_unwrap(cx, expr, &call_args[0])),
         };
 
         match (init.span == recv.span, suggestions) {

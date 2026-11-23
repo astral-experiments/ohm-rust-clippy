@@ -37,8 +37,8 @@ fn cargo_check(root: &Path, driver: &Path) -> String {
     stderr
 }
 
-#[test]
-fn automatic_fixes_preserve_suggestion_order_after_a_regular_check() {
+/// Create an isolated library for exercising Cargo's automatic fixes.
+fn fix_project() -> tempfile::TempDir {
     let root = tempfile::tempdir().unwrap();
     fs::create_dir(root.path().join("src")).unwrap();
     fs::write(
@@ -46,6 +46,25 @@ fn automatic_fixes_preserve_suggestion_order_after_a_regular_check() {
         "[package]\nname = \"fix-order\"\nversion = \"0.1.0\"\nedition = \"2024\"\n[workspace]\n",
     )
     .unwrap();
+    root
+}
+
+/// Run the test driver through Cargo, returning its diagnostic stream.
+fn run_clippy(root: &Path, args: &[&str]) -> String {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_cargo-clippy"));
+    configure_cargo(&mut command, root);
+    let output = command
+        .args(["clippy", "--lib", "--offline"])
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    String::from_utf8(output.stdout).unwrap()
+}
+
+#[test]
+fn automatic_fixes_preserve_suggestion_order_after_a_regular_check() {
+    let root = fix_project();
     let source = root.path().join("src/lib.rs");
     fs::write(
         &source,
@@ -53,17 +72,7 @@ fn automatic_fixes_preserve_suggestion_order_after_a_regular_check() {
     )
     .unwrap();
 
-    let clippy = |args: &[&str]| {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_cargo-clippy"));
-        configure_cargo(&mut command, root.path());
-        let output = command
-            .args(["clippy", "--lib", "--offline"])
-            .args(args)
-            .output()
-            .unwrap();
-        assert!(output.status.success(), "{output:?}");
-        String::from_utf8(output.stdout).unwrap()
-    };
+    let clippy = |args: &[&str]| run_clippy(root.path(), args);
 
     let lint_codes = |args: &[&str]| {
         clippy(args)
@@ -146,6 +155,48 @@ fn automatic_fixes_preserve_suggestion_order_after_a_regular_check() {
     clippy(&["--fix", "--allow-no-vcs"]);
     let fixed = fs::read_to_string(&source).unwrap();
     assert!(fixed.contains("{ a } else { b }) && c"), "{fixed}");
+}
+
+#[test]
+fn literal_unwrap_fixes_keep_only_required_grouping() {
+    let root = fix_project();
+    let source = root.path().join("src/lib.rs");
+    fs::write(
+        &source,
+        r"#![deny(unused_parens)]
+#![allow(clippy::all)]
+#![warn(clippy::unnecessary_literal_unwrap)]
+pub fn f(a: u8, b: u8) -> u8 {
+    let x = std::hint::black_box(Some(a | b).unwrap());
+    Some(a ^ b).unwrap().wrapping_add(Some(x & b).unwrap())
+}
+pub fn check(a: bool, b: bool) {
+    struct Mask { bit: bool }
+    if Some(Mask { bit: a }.bit | b).unwrap() {}
+    if Some(Mask { bit: a }.bit).unwrap() {}
+    match Some(Mask { bit: a }).unwrap() { _ => () }
+    if let true = Some(a || b).unwrap() {}
+    match Some(a | b).unwrap() { _ => () }
+    for _ in Some(&[a, b]).unwrap() {}
+}
+pub async fn read(a: bool, b: bool) -> Result<(), ()> {
+    struct Mask { bit: bool }
+    impl Mask {
+        async fn read(self) -> Result<bool, ()> { Ok(self.bit) }
+    }
+    if let true = Some(Mask { bit: a }.read().await? == b).unwrap() && a {}
+    if Some(Mask { bit: a }.read().await?).unwrap() {}
+    Ok(())
+}
+",
+    )
+    .unwrap();
+    run_clippy(root.path(), &["--fix", "--allow-no-vcs"]);
+    let fixed = fs::read_to_string(&source).unwrap();
+    assert!(!fixed.contains(".unwrap()"), "{fixed}");
+    assert!(fixed.contains("black_box(a | b)"), "{fixed}");
+    assert!(fixed.contains("(a ^ b).wrapping_add(x & b)"), "{fixed}");
+    run_clippy(root.path(), &[]);
 }
 
 fn compiled_fixture(stderr: &str) -> bool {
