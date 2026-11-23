@@ -1,7 +1,7 @@
 use clippy_utils::consts::is_zero_integer_const;
 use clippy_utils::diagnostics::{span_lint_and_help, span_lint_and_sugg};
 use clippy_utils::is_else_clause;
-use clippy_utils::source::{indent_of, reindent_multiline, snippet_with_context};
+use clippy_utils::source::{SpanExt as _, indent_of, reindent_multiline, snippet_with_context};
 use rustc_errors::Applicability;
 use rustc_hir::{BinOpKind, Expr, ExprKind, UnOp};
 use rustc_lint::{LateContext, LateLintPass, declare_lint_pass};
@@ -131,5 +131,11 @@ fn make_sugg(
         _ => String::new(),
     };
 
-    reindent_multiline(&suggestion, true, indent)
+    let suggestion = reindent_multiline(&suggestion, true, indent);
+    // Replacing the whole span also removes the parentheses in `(if ... { ... } else { ... }) && ...`.
+    if expr_span.with_source_text(cx, |src| src.starts_with('(') && src.ends_with(')')) == Some(true) {
+        format!("({suggestion})")
+    } else {
+        suggestion
+    }
 }

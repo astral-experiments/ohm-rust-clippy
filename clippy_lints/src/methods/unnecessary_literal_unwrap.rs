@@ -1,6 +1,7 @@
 use clippy_utils::diagnostics::span_lint_and_then;
 use clippy_utils::res::{MaybeDef as _, MaybeQPath as _};
-use clippy_utils::{is_none_expr, last_path_segment, sym};
+use clippy_utils::{get_parent_expr, is_none_expr, last_path_segment, sym};
+use rustc_ast::util::parser::ExprPrecedence;
 use rustc_errors::Applicability;
 use rustc_hir::{self as hir, AmbigArg};
 use rustc_lint::LateContext;
@@ -125,10 +126,22 @@ pub(super) fn check(
                 ),
                 (call_args[0].span.with_lo(args[0].span.lo()), ", ".to_string()),
             ]),
-            (_, _, None) => Some(vec![
-                (recv.span.with_hi(call_args[0].span.lo()), String::new()),
-                (expr.span.with_lo(call_args[0].span.hi()), String::new()),
-            ]),
+            (_, _, None) => {
+                // Preserve grouping when the surrounding operator binds at least as tightly.
+                let precedence = cx.precedence(&call_args[0]);
+                let (open, close) = if precedence < ExprPrecedence::Unambiguous
+                    && let Some(parent) = get_parent_expr(cx, expr)
+                    && precedence <= cx.precedence(parent)
+                {
+                    ("(", ")")
+                } else {
+                    ("", "")
+                };
+                Some(vec![
+                    (expr.span.with_hi(call_args[0].span.lo()), open.to_owned()),
+                    (expr.span.with_lo(call_args[0].span.hi()), close.to_owned()),
+                ])
+            },
         };
 
         match (init.span == recv.span, suggestions) {

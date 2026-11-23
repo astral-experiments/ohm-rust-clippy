@@ -595,8 +595,9 @@ rustc_lint::late_lint_methods!(
         DefaultNumericFallback: default_numeric_fallback::DefaultNumericFallback = default_numeric_fallback::DefaultNumericFallback,
         NonOctalUnixPermissions: non_octal_unix_permissions::NonOctalUnixPermissions = non_octal_unix_permissions::NonOctalUnixPermissions,
         ApproxConstant: approx_const::ApproxConstant = approx_const::ApproxConstant::new(conf),
-        RedundantMatches: matches::RedundantMatches = matches::RedundantMatches,
+        // Keep match_like_matches_macro ahead of overlapping if-let fixes in the whole-crate pass.
         Matches: matches::Matches = matches::Matches::new(conf),
+        RedundantMatches: matches::RedundantMatches = matches::RedundantMatches,
         ManualNonExhaustive: manual_non_exhaustive::ManualNonExhaustive = manual_non_exhaustive::ManualNonExhaustive::new(conf),
         ManualStrip: manual_strip::ManualStrip = manual_strip::ManualStrip::new(conf),
         CheckedConversions: checked_conversions::CheckedConversions = checked_conversions::CheckedConversions::new(conf),
