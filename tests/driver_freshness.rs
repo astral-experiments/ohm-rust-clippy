@@ -5,16 +5,13 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-fn cargo_check(root: &Path, driver: &Path) -> String {
-    let mut command = Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
+/// Run Cargo against an isolated target directory with the compiler used to build the driver.
+fn configure_cargo(command: &mut Command, root: &Path) {
     command
         .current_dir(root)
-        .args(["check", "--offline", "--verbose"])
         .env("CARGO_TARGET_DIR", root.join("target"))
         .env("CARGO_INCREMENTAL", "1")
         .env("CARGO_BUILD_WARNINGS", "warn")
-        .env("RUSTC_WORKSPACE_WRAPPER", driver)
-        .env("CLIPPY_ARGS", "-Wclippy::zero_sized_map_values__CLIPPY_HACKERY__")
         .env_remove("RUSTC_WRAPPER")
         .env_remove("RUSTFLAGS")
         .env_remove("CARGO_ENCODED_RUSTFLAGS")
@@ -25,10 +22,71 @@ fn cargo_check(root: &Path, driver: &Path) -> String {
     if let Some(sysroot) = option_env!("TEST_SYSROOT") {
         command.env("SYSROOT", sysroot);
     }
+}
+
+fn cargo_check(root: &Path, driver: &Path) -> String {
+    let mut command = Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
+    configure_cargo(&mut command, root);
+    command
+        .args(["check", "--offline", "--verbose"])
+        .env("RUSTC_WORKSPACE_WRAPPER", driver)
+        .env("CLIPPY_ARGS", "-Wclippy::zero_sized_map_values__CLIPPY_HACKERY__");
     let output = command.output().unwrap();
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(output.status.success(), "{stderr}");
     stderr
+}
+
+#[test]
+fn automatic_fixes_preserve_suggestion_order_after_a_regular_check() {
+    let root = tempfile::tempdir().unwrap();
+    fs::create_dir(root.path().join("src")).unwrap();
+    fs::write(
+        root.path().join("Cargo.toml"),
+        "[package]\nname = \"fix-order\"\nversion = \"0.1.0\"\nedition = \"2024\"\n[workspace]\n",
+    )
+    .unwrap();
+    let source = root.path().join("src/lib.rs");
+    fs::write(
+        &source,
+        "pub fn f(a: bool, b: bool) -> bool { Some(a & b).unwrap() == false }\n",
+    )
+    .unwrap();
+
+    let clippy = |args: &[&str]| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_cargo-clippy"));
+        configure_cargo(&mut command, root.path());
+        let output = command
+            .args(["clippy", "--lib", "--offline"])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        String::from_utf8(output.stdout).unwrap()
+    };
+
+    // Cargo can replay the previous check's diagnostics even when only the message format changes.
+    clippy(&[]);
+    for args in [
+        &["--message-format", "json-diagnostic-rendered-ansi"][..],
+        &["--message-format=json"][..],
+    ] {
+        let output = clippy(args);
+        let messages: Vec<serde_json::Value> = output.lines().map(|line| serde_json::from_str(line).unwrap()).collect();
+        let lints: Vec<_> = messages
+            .iter()
+            .filter_map(|m| m["message"]["code"]["code"].as_str())
+            .filter(|lint| lint.starts_with("clippy::"))
+            .collect();
+        assert_eq!(lints, ["clippy::bool_comparison", "clippy::unnecessary_literal_unwrap"]);
+    }
+
+    clippy(&[]);
+    clippy(&["--fix", "--allow-no-vcs"]);
+    assert_eq!(
+        fs::read_to_string(source).unwrap(),
+        "pub fn f(a: bool, b: bool) -> bool { !(a & b) }\n"
+    );
 }
 
 fn compiled_fixture(stderr: &str) -> bool {

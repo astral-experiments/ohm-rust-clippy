@@ -148,6 +148,7 @@ impl rustc_driver::Callbacks for RustcCallbacks {
 
 struct ClippyCallbacks {
     clippy_args_var: Option<String>,
+    ordered_lints: bool,
 }
 
 impl rustc_driver::Callbacks for ClippyCallbacks {
@@ -191,6 +192,9 @@ impl rustc_driver::Callbacks for ClippyCallbacks {
                 env::var("CLIPPY_CONF_DIR").ok().map(|dir| Symbol::intern(&dir)),
             ));
         }));
+        // Retain the verified configuration and driver inputs even when all late passes
+        // need to run together to preserve the order of overlapping suggestions.
+        let module_lints = incremental_lints && !self.ordered_lints;
         config.register_lints = Some(Box::new(move |sess, lint_store| {
             // technically we're ~guaranteed that this is none but might as well call anything that
             // is there already. Certainly it can't hurt.
@@ -210,7 +214,7 @@ impl rustc_driver::Callbacks for ClippyCallbacks {
             };
             #[cfg(not(ohm_incremental_driver_hash))]
             let conf = clippy_config::Conf::load(sess);
-            clippy_lints::register_lint_passes(lint_store, conf, incremental_lints);
+            clippy_lints::register_lint_passes(lint_store, conf, module_lints);
 
             #[cfg(feature = "internal")]
             clippy_lints_internal::register_lints(lint_store);
@@ -320,6 +324,7 @@ fn main() -> ExitCode {
         pass_sysroot_env_if_given(&mut args, sys_root_env);
 
         let mut no_deps = false;
+        let mut ordered_lints = false;
         let clippy_args_var = env::var("CLIPPY_ARGS").ok();
         let clippy_args = clippy_args_var
             .as_deref()
@@ -327,6 +332,10 @@ fn main() -> ExitCode {
             .split("__CLIPPY_HACKERY__")
             .filter_map(|s| match s {
                 "" => None,
+                "--ohm-ordered-lints" => {
+                    ordered_lints = true;
+                    None
+                },
                 "--no-deps" => {
                     no_deps = true;
                     None
@@ -351,7 +360,13 @@ fn main() -> ExitCode {
         let clippy_enabled = !cap_lints_allow && relevant_package && !info_query;
         if clippy_enabled {
             args.extend(clippy_args);
-            rustc_driver::run_compiler(&args, &mut ClippyCallbacks { clippy_args_var });
+            rustc_driver::run_compiler(
+                &args,
+                &mut ClippyCallbacks {
+                    clippy_args_var,
+                    ordered_lints,
+                },
+            );
         } else {
             rustc_driver::run_compiler(&args, &mut RustcCallbacks { clippy_args_var });
         }

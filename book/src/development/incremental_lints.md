@@ -4,6 +4,16 @@ Ohm can run selected late passes through rustc's `lint_mod` queries. Unchanged
 modules replay diagnostics through the query cache, including suggestions and
 lint expectations. Other passes retain the combined whole-crate traversal.
 
+With `cargo clippy --fix` or a Cargo message format that emits JSON diagnostics,
+Clippy runs all late passes together. Automatic fixers can choose between
+overlapping edits based on the order of the suggestions. Splitting a method
+lint and an enclosing comparison across traversals can change that order and
+the meaning of the fixed code. This also affects external tools such as
+`cargo fixit --clippy` that read Cargo's JSON diagnostics. These invocations
+forgo Clippy's module cache and still use rustc's incremental compilation.
+The mode is part of `CLIPPY_ARGS` so switching modes invalidates cached
+diagnostics. Human, short, and Cargo-rendered diagnostics can use module passes.
+
 The explicit list in `clippy_lints/src/incremental_lints.rs` generates both the
 module pass and its lint identities. A pass must move in its entirety. It must
 not depend on traversal order across modules, and all of its inputs must be
