@@ -65,28 +65,87 @@ fn automatic_fixes_preserve_suggestion_order_after_a_regular_check() {
         String::from_utf8(output.stdout).unwrap()
     };
 
+    let lint_codes = |args: &[&str]| {
+        clippy(args)
+            .lines()
+            .filter_map(|line| {
+                let m: serde_json::Value = serde_json::from_str(line).unwrap();
+                let code = m["message"]["code"]["code"].as_str()?;
+                code.starts_with("clippy::").then(|| code.to_owned())
+            })
+            .collect::<Vec<_>>()
+    };
+
     // Cargo can replay the previous check's diagnostics even when only the message format changes.
     clippy(&[]);
     for args in [
         &["--message-format", "json-diagnostic-rendered-ansi"][..],
         &["--message-format=json"][..],
     ] {
-        let output = clippy(args);
-        let messages: Vec<serde_json::Value> = output.lines().map(|line| serde_json::from_str(line).unwrap()).collect();
-        let lints: Vec<_> = messages
-            .iter()
-            .filter_map(|m| m["message"]["code"]["code"].as_str())
-            .filter(|lint| lint.starts_with("clippy::"))
-            .collect();
-        assert_eq!(lints, ["clippy::bool_comparison", "clippy::unnecessary_literal_unwrap"]);
+        assert_eq!(
+            lint_codes(args),
+            ["clippy::bool_comparison", "clippy::unnecessary_literal_unwrap"]
+        );
     }
 
     clippy(&[]);
     clippy(&["--fix", "--allow-no-vcs"]);
     assert_eq!(
-        fs::read_to_string(source).unwrap(),
+        fs::read_to_string(&source).unwrap(),
         "pub fn f(a: bool, b: bool) -> bool { !(a & b) }\n"
     );
+
+    // Fixers can group diagnostics across targets before choosing which edit to apply.
+    fs::write(
+        &source,
+        "#![warn(clippy::equatable_if_let)]\n\
+         pub fn f(a: bool, b: bool) -> bool { if let false = Some(a | b).unwrap() { true } else { false } }\n",
+    )
+    .unwrap();
+    assert_eq!(
+        lint_codes(&["--message-format=json"]),
+        [
+            "clippy::match_like_matches_macro",
+            "clippy::redundant_pattern_matching",
+            "clippy::equatable_if_let",
+            "clippy::unnecessary_literal_unwrap",
+        ]
+    );
+
+    // A different mix of targets can apply the negation before removing the unwrap.
+    fs::write(
+        &source,
+        "pub fn f(a: bool, b: bool) -> bool { !Some(a | b).unwrap() }\n",
+    )
+    .unwrap();
+    clippy(&["--fix", "--allow-no-vcs"]);
+    assert_eq!(
+        fs::read_to_string(&source).unwrap(),
+        "pub fn f(a: bool, b: bool) -> bool { !(a | b) }\n"
+    );
+
+    // The call's outer parentheses belong to the replaced span on both sides.
+    fs::write(
+        &source,
+        "pub fn f(a: bool, b: bool) -> bool { (Some(a | b).unwrap()) & !a }\n",
+    )
+    .unwrap();
+    clippy(&["--fix", "--allow-no-vcs"]);
+    assert_eq!(
+        fs::read_to_string(&source).unwrap(),
+        "pub fn f(a: bool, b: bool) -> bool { (a | b) & !a }\n"
+    );
+
+    // Swapping the branches after the unwrap must preserve the grouping on the left of &&.
+    fs::write(
+        &source,
+        "#![warn(clippy::if_not_else)]\n\
+         pub fn f(a: bool, b: bool, c: bool) -> bool { (if !(a ^ b) { b } else { a }) && c }\n",
+    )
+    .unwrap();
+    clippy(&["--fix", "--allow-no-vcs"]);
+    let fixed = fs::read_to_string(&source).unwrap();
+    assert!(fixed.contains("{ a } else { b }) && c"), "{fixed}");
 }
 
 fn compiled_fixture(stderr: &str) -> bool {
