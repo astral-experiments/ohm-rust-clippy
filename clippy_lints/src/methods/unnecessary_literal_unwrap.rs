@@ -114,10 +114,12 @@ pub(super) fn check(
         return;
     }
 
-    let (constructor, call_args, ty) = if let hir::ExprKind::Call(call, call_args) = init.kind {
+    let (constructor, call_args, ty) = if let hir::ExprKind::Call(call, call_args @ [value]) = init.kind {
         if let Some((qpath, hir_id)) = call.opt_qpath()
             && let args = last_path_segment(qpath).args.map(|args| args.args)
             && let Some(did) = cx.qpath_res(qpath, hir_id).ctor_parent(cx).opt_def_id()
+            // A diverging argument never reaches the constructor or the unwrap.
+            && !cx.typeck_results().expr_ty(value).is_never()
         {
             let lang_items = cx.tcx.lang_items();
             if Some(did) == lang_items.option_some_variant() {
@@ -138,14 +140,6 @@ pub(super) fn check(
     } else {
         return;
     };
-
-    // A diverging argument never reaches the constructor or the unwrap. Moving
-    // a `break` out of the call can also change how a following block parses.
-    if let [value] = call_args
-        && cx.typeck_results().expr_ty(value).is_never()
-    {
-        return;
-    }
 
     let help_message = format!("used `{method}()` on `{constructor}` value");
     let suggestion_message = format!("remove the `{constructor}` and `{method}()`");
