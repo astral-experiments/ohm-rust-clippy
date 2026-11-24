@@ -151,4 +151,15 @@ fn unwrap_unchecked() {
     //~^ unnecessary_literal_unwrap
 }
 
+#[allow(unreachable_code)]
+#[deny(unused_parens)]
+fn diverging_argument() -> i32 {
+    'value: {
+        if Some(break 'value 1).unwrap() {
+            return 2;
+        }
+        3
+    }
+}
+
 fn main() {}

@@ -139,6 +139,14 @@ pub(super) fn check(
         return;
     };
 
+    // A diverging argument never reaches the constructor or the unwrap. Moving
+    // a `break` out of the call can also change how a following block parses.
+    if let [value] = call_args
+        && cx.typeck_results().expr_ty(value).is_never()
+    {
+        return;
+    }
+
     let help_message = format!("used `{method}()` on `{constructor}` value");
     let suggestion_message = format!("remove the `{constructor}` and `{method}()`");
 
