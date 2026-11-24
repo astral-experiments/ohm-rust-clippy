@@ -138,10 +138,11 @@ path_macros! {
 pub static FUTURES_IO_ASYNCREADEXT: PathLookup = type_path!(futures_util::AsyncReadExt);
 pub static FUTURES_IO_ASYNCWRITEEXT: PathLookup = type_path!(futures_util::AsyncWriteExt);
 pub static ITERTOOLS_NEXT_TUPLE: PathLookup = value_path!(itertools::Itertools::next_tuple);
+// Use the public re-exports because `tcx.module_children` can omit private modules.
 pub static PARKING_LOT_GUARDS: [PathLookup; 3] = [
-    type_path!(lock_api::mutex::MutexGuard),
-    type_path!(lock_api::rwlock::RwLockReadGuard),
-    type_path!(lock_api::rwlock::RwLockWriteGuard),
+    type_path!(lock_api::MutexGuard),
+    type_path!(lock_api::RwLockReadGuard),
+    type_path!(lock_api::RwLockWriteGuard),
 ];
 pub static REGEX_BUILDER_NEW: PathLookup = value_path!(regex::RegexBuilder::new);
 pub static REGEX_BYTES_BUILDER_NEW: PathLookup = value_path!(regex::bytes::RegexBuilder::new);

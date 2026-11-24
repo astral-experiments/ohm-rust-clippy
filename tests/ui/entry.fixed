@@ -282,3 +282,11 @@ fn issue15781(m: &mut std::collections::HashMap<i32, i32>, k: i32, v: i32) {
         v
     });
 }
+
+async fn parking_lot_guard(map: &parking_lot::Mutex<HashMap<u32, u32>>) {
+    // An entry would keep the temporary lock guard alive across the await.
+    if !map.lock().contains_key(&0) {
+        std::future::pending::<()>().await;
+        map.lock().insert(0, 0);
+    }
+}
