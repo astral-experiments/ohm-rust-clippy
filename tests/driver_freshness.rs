@@ -62,8 +62,8 @@ fn run_clippy(root: &Path, args: &[&str]) -> String {
     String::from_utf8(output.stdout).unwrap()
 }
 
-#[test]
-fn configured_paths_match_public_reexports_from_private_modules() {
+/// Add a local `keys` dependency to the test project.
+fn keys_project() -> tempfile::TempDir {
     let root = fix_project();
     let dir = root.path();
     let manifest = dir.join("Cargo.toml");
@@ -77,6 +77,13 @@ fn configured_paths_match_public_reexports_from_private_modules() {
         "[package]\nname = \"keys\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
     )
     .unwrap();
+    root
+}
+
+#[test]
+fn configured_paths_match_public_reexports_from_private_modules() {
+    let root = keys_project();
+    let dir = root.path();
     fs::write(
         dir.join("keys/src/lib.rs"),
         "mod raw { pub struct Token; impl Token { pub fn use_it(&self) {} } }\n\
@@ -105,6 +112,44 @@ fn configured_paths_match_public_reexports_from_private_modules() {
         assert!(output.contains("clippy::disallowed_types"), "{output}");
         assert!(output.contains("clippy::disallowed_methods"), "{output}");
         assert!(output.contains("clippy::missing_enforced_import_renames"), "{output}");
+    }
+}
+
+#[test]
+fn configured_paths_follow_changes_to_hidden_public_reexports() {
+    let root = keys_project();
+    let dir = root.path();
+    fs::write(
+        dir.join("src/lib.rs"),
+        "pub fn take(key: keys::Alpha) { key.use_it(); }\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("clippy.toml"),
+        "disallowed-types = [\"keys::policy::Restricted\"]\n\
+         disallowed-methods = [\"keys::policy::Restricted::use_it\"]\n",
+    )
+    .unwrap();
+
+    // Only the contents of the unexported module change between checks.
+    for (binding, banned) in [
+        ("", false),
+        ("pub use super::Alpha as Restricted;", true),
+        ("pub use super::Bravo as Restricted;", false),
+        ("pub use super::Alpha as Restricted;", true),
+    ] {
+        fs::write(
+            dir.join("keys/src/lib.rs"),
+            format!(
+                "pub struct Alpha; impl Alpha {{ pub fn use_it(&self) {{}} }}\n\
+                 pub struct Bravo; impl Bravo {{ pub fn use_it(&self) {{}} }}\n\
+                 #[allow(unused_imports)] mod policy {{ {binding} }}\n"
+            ),
+        )
+        .unwrap();
+        let output = run_clippy(dir, &["--no-deps", "--message-format=json"]);
+        assert_eq!(output.contains("clippy::disallowed_types"), banned, "{output}");
+        assert_eq!(output.contains("clippy::disallowed_methods"), banned, "{output}");
     }
 }
 
