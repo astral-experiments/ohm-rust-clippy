@@ -1,7 +1,7 @@
 use crate::de::{
     Deserialize, DeserializeOrDefault, DiagCtxt, FromDefault, TomlValue, create_value_list_msg, find_closest_match,
 };
-use clippy_utils::paths::{PathNS, find_crates, lookup_path};
+use clippy_utils::paths::{PathNS, find_crates, lookup_configured_path};
 use core::fmt::{self, Display};
 use itertools::Itertools as _;
 use rustc_data_structures::fx::{FxHashMap, FxHashSet};
@@ -247,7 +247,7 @@ pub fn create_disallowed_map<const REPLACEMENT_ALLOWED: bool>(
     for disallowed_path in disallowed_paths {
         let path = &*disallowed_path.path.node;
         let sym_path: Vec<Symbol> = path.split("::").map(Symbol::intern).collect();
-        let mut resolutions = lookup_path(tcx, ns, &sym_path);
+        let mut resolutions = lookup_configured_path(tcx, ns, &sym_path);
         resolutions.retain(|&def_id| def_kind_predicate(tcx.def_kind(def_id)));
 
         let (prim_ty, found_prim_ty) = if let &[name] = sym_path.as_slice()
@@ -266,7 +266,7 @@ pub fn create_disallowed_map<const REPLACEMENT_ALLOWED: bool>(
             && (sym_path.len() < 2 || !find_crates(tcx, sym_path[0]).is_empty())
         {
             // Relookup the path in an arbitrary namespace to get a good `expected, found` message
-            let found_def_ids = lookup_path(tcx, PathNS::Arbitrary, &sym_path);
+            let found_def_ids = lookup_configured_path(tcx, PathNS::Arbitrary, &sym_path);
             let message = if let Some(&def_id) = found_def_ids.first() {
                 let (article, description) = tcx.article_and_description(def_id);
                 format!("expected a {predicate_description}, found {article} {description}")

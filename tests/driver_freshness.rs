@@ -63,6 +63,52 @@ fn run_clippy(root: &Path, args: &[&str]) -> String {
 }
 
 #[test]
+fn configured_paths_match_public_reexports_from_private_modules() {
+    let root = fix_project();
+    let dir = root.path();
+    let manifest = dir.join("Cargo.toml");
+    let mut contents = fs::read_to_string(&manifest).unwrap();
+    contents.push_str("\n[dependencies]\nkeys = { path = \"keys\" }\n");
+    fs::write(manifest, contents).unwrap();
+
+    fs::create_dir_all(dir.join("keys/src")).unwrap();
+    fs::write(
+        dir.join("keys/Cargo.toml"),
+        "[package]\nname = \"keys\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("keys/src/lib.rs"),
+        "mod raw { pub struct Token; impl Token { pub fn use_it(&self) {} } }\n\
+         pub use raw::Token as Handle;\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/lib.rs"),
+        "#![warn(clippy::missing_enforced_import_renames)]\n\
+         use keys::Handle;\n\
+         pub fn take(key: Handle) { key.use_it(); }\n",
+    )
+    .unwrap();
+
+    for path in ["keys::raw::Token", "keys::Handle"] {
+        fs::write(
+            dir.join("clippy.toml"),
+            format!(
+                "disallowed-types = [\"{path}\"]\n\
+                 disallowed-methods = [\"{path}::use_it\"]\n\
+                 enforced-import-renames = [{{ path = \"{path}\", rename = \"Key\" }}]\n"
+            ),
+        )
+        .unwrap();
+        let output = run_clippy(dir, &["--no-deps", "--message-format=json"]);
+        assert!(output.contains("clippy::disallowed_types"), "{output}");
+        assert!(output.contains("clippy::disallowed_methods"), "{output}");
+        assert!(output.contains("clippy::missing_enforced_import_renames"), "{output}");
+    }
+}
+
+#[test]
 fn automatic_fixes_preserve_suggestion_order_after_a_regular_check() {
     let root = fix_project();
     let source = root.path().join("src/lib.rs");

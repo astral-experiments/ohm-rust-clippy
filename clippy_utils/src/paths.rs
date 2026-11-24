@@ -13,6 +13,8 @@ use rustc_hir::def::{DefKind, Namespace, Res};
 use rustc_hir::def_id::{DefId, LOCAL_CRATE, LocalDefId};
 use rustc_hir::{ItemKind, Node, UseKind, UseTree};
 use rustc_lint::LateContext;
+use rustc_metadata::creader::CStore;
+use rustc_middle::middle::resolve::ModChild;
 use rustc_middle::ty::fast_reject::SimplifiedType;
 use rustc_middle::ty::layout::HasTyCtxt;
 use rustc_middle::ty::{FloatTy, IntTy, Ty, TyCtxt, UintTy};
@@ -163,12 +165,12 @@ pub static ONCE_CELL_SYNC_LAZY_NEW: PathLookup = value_path!(once_cell::sync::La
 
 // Paths for internal lints go in `clippy_lints_internal/src/internal_paths.rs`
 
-/// Equivalent to a [`lookup_path`] after splitting the input string on `::`
+/// Resolve a path string, including the original module path of a re-exported item.
 ///
 /// This function is expensive and should be used sparingly.
 pub fn lookup_path_str(tcx: TyCtxt<'_>, ns: PathNS, path: &str) -> Vec<DefId> {
     let path: Vec<Symbol> = path.split("::").map(Symbol::intern).collect();
-    lookup_path(tcx, ns, &path)
+    lookup_configured_path(tcx, ns, &path)
 }
 
 /// Resolves a def path like `std::vec::Vec`.
@@ -183,6 +185,16 @@ pub fn lookup_path_str(tcx: TyCtxt<'_>, ns: PathNS, path: &str) -> Vec<DefId> {
 /// [2]: https://doc.rust-lang.org/std/boxed/struct.Box.html#method.downcast-1
 /// [3]: https://doc.rust-lang.org/std/boxed/struct.Box.html#method.downcast-2
 pub fn lookup_path(tcx: TyCtxt<'_>, ns: PathNS, path: &[Symbol]) -> Vec<DefId> {
+    lookup_path_impl::<false>(tcx, ns, path)
+}
+
+/// Resolve a lint setting written using an item's original path through private modules.
+pub fn lookup_configured_path(tcx: TyCtxt<'_>, ns: PathNS, path: &[Symbol]) -> Vec<DefId> {
+    lookup_path_impl::<true>(tcx, ns, path)
+}
+
+/// Resolve each crate version separately, including versions with different public exports.
+fn lookup_path_impl<const PRIVATE_MODULES: bool>(tcx: TyCtxt<'_>, ns: PathNS, path: &[Symbol]) -> Vec<DefId> {
     let (root, rest) = match *path {
         [] | [_] => return Vec::new(),
         [root, ref rest @ ..] => (root, rest),
@@ -190,7 +202,7 @@ pub fn lookup_path(tcx: TyCtxt<'_>, ns: PathNS, path: &[Symbol]) -> Vec<DefId> {
 
     let mut out = Vec::new();
     for &base in find_crates(tcx, root).iter().chain(find_primitive_impls(tcx, root)) {
-        lookup_with_base(tcx, base, ns, rest, &mut out);
+        lookup_with_base::<PRIVATE_MODULES>(tcx, base, ns, rest, &mut out);
     }
     out
 }
@@ -245,7 +257,13 @@ fn find_primitive_impls(tcx: TyCtxt<'_>, name: Symbol) -> &[DefId] {
 }
 
 /// Resolves a def path like `vec::Vec` with the base `std`.
-fn lookup_with_base(tcx: TyCtxt<'_>, mut base: DefId, ns: PathNS, mut path: &[Symbol], out: &mut Vec<DefId>) {
+fn lookup_with_base<const PRIVATE_MODULES: bool>(
+    tcx: TyCtxt<'_>,
+    mut base: DefId,
+    ns: PathNS,
+    mut path: &[Symbol],
+    out: &mut Vec<DefId>,
+) {
     loop {
         match *path {
             [segment] => {
@@ -263,14 +281,45 @@ fn lookup_with_base(tcx: TyCtxt<'_>, mut base: DefId, ns: PathNS, mut path: &[Sy
             },
             [segment, ref rest @ ..] => {
                 path = rest;
-                let Some(child) = item_child_by_name(tcx, base, PathNS::Type, segment) else {
+                if let Some(child) = item_child_by_name(tcx, base, PathNS::Type, segment) {
+                    base = child;
+                } else if PRIVATE_MODULES && let Some(module) = private_module_by_name(tcx, base, segment) {
+                    base = module;
+                } else {
                     return;
-                };
-                base = child;
+                }
             },
             [] => unreachable!(),
         }
     }
+}
+
+/// Find an enclosing module omitted from the public bindings of an external crate.
+///
+/// Re-exported items keep their original definition paths. Follow only module declarations
+/// here, since private imports can change independently of those paths.
+fn private_module_by_name(tcx: TyCtxt<'_>, base: DefId, name: Symbol) -> Option<DefId> {
+    // Upstream rustc puts these bindings in `module_children`. On Ohm, CStore's
+    // inherent method takes precedence and reads the omitted bindings on demand.
+    #[allow(dead_code, reason = "Only used when building with upstream rustc")]
+    trait UnpartitionedMetadata {
+        fn private_module_children_untracked(&self, _: TyCtxt<'_>, _: DefId) -> std::iter::Empty<ModChild> {
+            std::iter::empty()
+        }
+    }
+
+    impl UnpartitionedMetadata for CStore {}
+
+    if base.is_local() || tcx.def_kind(base) != DefKind::Mod {
+        return None;
+    }
+
+    CStore::from_tcx(tcx)
+        .private_module_children_untracked(tcx, base)
+        .find_map(|child| match child.res {
+            Res::Def(DefKind::Mod, id) if child.ident.name == name && child.reexport_chain.is_empty() => Some(id),
+            _ => None,
+        })
 }
 
 fn item_child_by_name(tcx: TyCtxt<'_>, def_id: DefId, ns: PathNS, name: Symbol) -> Option<DefId> {
