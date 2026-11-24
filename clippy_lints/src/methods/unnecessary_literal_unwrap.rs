@@ -87,10 +87,9 @@ fn remove_unwrap(cx: &LateContext<'_>, expr: &hir::Expr<'_>, value: &hir::Expr<'
         E::Call(base, _) | E::MethodCall(_, base, ..) | E::Index(base, ..) => {
             base.hir_id == expr.hir_id || parent.span.desugaring_kind().is_some()
         },
-        E::Tup(..) | E::Array(..) | E::Repeat(..) => false,
-        // A jump, a closure body and the right-hand side of an assignment can
-        // take a whole expression, even one of equal or lower precedence.
-        E::Ret(_) | E::Break(..) | E::Yield(..) | E::Closure(_) => false,
+        // Like tuple and array elements, jump operands, closure bodies and assignment
+        // right-hand sides can take an expression of equal or lower precedence.
+        E::Tup(..) | E::Array(..) | E::Repeat(..) | E::Ret(_) | E::Break(..) | E::Yield(..) | E::Closure(_) => false,
         E::Assign(_, rhs, _) | E::AssignOp(_, _, rhs) => rhs.hir_id != expr.hir_id,
         _ => true,
     };
