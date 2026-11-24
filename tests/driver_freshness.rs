@@ -179,6 +179,14 @@ pub fn check(a: bool, b: bool) {
     match Some(a | b).unwrap() { _ => () }
     for _ in Some(&[a, b]).unwrap() {}
 }
+pub fn closures() -> impl Fn() -> u8 {
+    let first;
+    first = Some(|| 1u8).unwrap();
+    let second = || Some(|| 2u8).unwrap();
+    let third = loop { break Some(|| 3u8).unwrap(); };
+    let last = Some(|| 4u8).unwrap()();
+    return Some(move || first() + second()() + third() + last).unwrap();
+}
 pub async fn read(a: bool, b: bool) -> Result<(), ()> {
     struct Mask { bit: bool }
     impl Mask {
