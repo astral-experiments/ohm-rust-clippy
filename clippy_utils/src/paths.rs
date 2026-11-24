@@ -299,10 +299,6 @@ fn lookup_with_base<const PRIVATE_MODULES: bool>(
 /// Re-exported items keep their original definition paths. Follow only module declarations
 /// here, since private imports can change independently of those paths.
 fn private_module_by_name(tcx: TyCtxt<'_>, base: DefId, name: Symbol) -> Option<DefId> {
-    if base.is_local() || tcx.def_kind(base) != DefKind::Mod {
-        return None;
-    }
-
     // Upstream rustc puts these bindings in `module_children`. On Ohm, CStore's
     // inherent method takes precedence and reads the omitted bindings on demand.
     #[allow(dead_code, reason = "Only used when building with upstream rustc")]
@@ -313,6 +309,10 @@ fn private_module_by_name(tcx: TyCtxt<'_>, base: DefId, name: Symbol) -> Option<
     }
 
     impl UnpartitionedMetadata for CStore {}
+
+    if base.is_local() || tcx.def_kind(base) != DefKind::Mod {
+        return None;
+    }
 
     CStore::from_tcx(tcx)
         .private_module_children_untracked(tcx, base)
