@@ -10,7 +10,7 @@ use rustc_ast::Mutability;
 use rustc_data_structures::fx::FxHashMap;
 use rustc_hir::def::Namespace::{MacroNS, TypeNS, ValueNS};
 use rustc_hir::def::{DefKind, Namespace, Res};
-use rustc_hir::def_id::{DefId, LOCAL_CRATE, LocalDefId};
+use rustc_hir::def_id::{CrateNum, DefId, LOCAL_CRATE, LocalDefId};
 use rustc_hir::{ItemKind, Node, UseKind, UseTree};
 use rustc_lint::LateContext;
 use rustc_metadata::creader::CStore;
@@ -188,7 +188,7 @@ pub fn lookup_path(tcx: TyCtxt<'_>, ns: PathNS, path: &[Symbol]) -> Vec<DefId> {
     lookup_path_impl::<false>(tcx, ns, path)
 }
 
-/// Resolve a lint setting written using an item's original path through private modules.
+/// Resolve a lint setting that can name declarations or public re-exports in private modules.
 pub fn lookup_configured_path(tcx: TyCtxt<'_>, ns: PathNS, path: &[Symbol]) -> Vec<DefId> {
     lookup_path_impl::<true>(tcx, ns, path)
 }
@@ -264,10 +264,15 @@ fn lookup_with_base<const PRIVATE_MODULES: bool>(
     mut path: &[Symbol],
     out: &mut Vec<DefId>,
 ) {
+    let child_by_name = |base, ns, name| match item_child_by_name(tcx, base, ns, name) {
+        None if PRIVATE_MODULES => omitted_binding_by_name(tcx, base, ns, name),
+        child => child,
+    };
+
     loop {
         match *path {
             [segment] => {
-                out.extend(item_child_by_name(tcx, base, ns, segment));
+                out.extend(child_by_name(base, ns, segment));
 
                 // When the current def_id is e.g. `struct S`, check the impl items in
                 // `impl S { ... }`
@@ -281,28 +286,27 @@ fn lookup_with_base<const PRIVATE_MODULES: bool>(
             },
             [segment, ref rest @ ..] => {
                 path = rest;
-                if let Some(child) = item_child_by_name(tcx, base, PathNS::Type, segment) {
-                    base = child;
-                } else if PRIVATE_MODULES && let Some(module) = private_module_by_name(tcx, base, segment) {
-                    base = module;
-                } else {
+                let Some(child) = child_by_name(base, PathNS::Type, segment) else {
                     return;
-                }
+                };
+                base = child;
             },
             [] => unreachable!(),
         }
     }
 }
 
-/// Find an enclosing module omitted from the public bindings of an external crate.
-///
-/// Re-exported items keep their original definition paths. Follow only module declarations
-/// here, since private imports can change independently of those paths.
-fn private_module_by_name(tcx: TyCtxt<'_>, base: DefId, name: Symbol) -> Option<DefId> {
+/// Find a module declaration or public re-export omitted from an external crate's public hash.
+fn omitted_binding_by_name(tcx: TyCtxt<'_>, base: DefId, ns: PathNS, name: Symbol) -> Option<DefId> {
     // Upstream rustc puts these bindings in `module_children`. On Ohm, CStore's
     // inherent method takes precedence and reads the omitted bindings on demand.
     #[allow(dead_code, reason = "Only used when building with upstream rustc")]
     trait UnpartitionedMetadata {
+        /// Upstream tracks changes to the entire dependency.
+        fn has_public_api_hash(&self, _: CrateNum) -> bool {
+            false
+        }
+
         fn private_module_children_untracked(&self, _: TyCtxt<'_>, _: DefId) -> std::iter::Empty<ModChild> {
             std::iter::empty()
         }
@@ -314,12 +318,31 @@ fn private_module_by_name(tcx: TyCtxt<'_>, base: DefId, name: Symbol) -> Option<
         return None;
     }
 
-    CStore::from_tcx(tcx)
+    let store = CStore::from_tcx(tcx);
+    let child = store
         .private_module_children_untracked(tcx, base)
-        .find_map(|child| match child.res {
-            Res::Def(DefKind::Mod, id) if child.ident.name == name && child.reexport_chain.is_empty() => Some(id),
-            _ => None,
-        })
+        .find(|child| child.ident.name == name && ns.matches(child.res.ns()));
+    if let Some(child) = &child
+        && let Res::Def(DefKind::Mod, id) = child.res
+        && child.reexport_chain.is_empty()
+    {
+        return Some(id);
+    }
+
+    // A hidden re-export can be added or retargeted without changing the public hash.
+    // Track the metadata we consulted, even when the configured name is currently absent.
+    if store.has_public_api_hash(base.krate) {
+        let source = tcx.used_crate_source(base.krate);
+        if let Some(path) = source.rmeta.as_ref().or(source.rlib.as_ref()).or(source.dylib.as_ref())
+            && let Some(path) = path.to_str()
+        {
+            tcx.sess.file_depinfo.borrow_mut().insert(Symbol::intern(path));
+        }
+    }
+
+    child
+        .filter(|child| child.vis.is_public() && !child.reexport_chain.is_empty())
+        .and_then(|child| child.res.opt_def_id())
 }
 
 fn item_child_by_name(tcx: TyCtxt<'_>, def_id: DefId, ns: PathNS, name: Symbol) -> Option<DefId> {
