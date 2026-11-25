@@ -188,7 +188,7 @@ pub fn lookup_path(tcx: TyCtxt<'_>, ns: PathNS, path: &[Symbol]) -> Vec<DefId> {
     lookup_path_impl::<false>(tcx, ns, path)
 }
 
-/// Resolve a lint setting that can name items through private modules and imports.
+/// Resolve a lint setting that can name private items and imports.
 pub fn lookup_configured_path(tcx: TyCtxt<'_>, ns: PathNS, path: &[Symbol]) -> Vec<DefId> {
     lookup_path_impl::<true>(tcx, ns, path)
 }
@@ -296,7 +296,7 @@ fn lookup_with_base<const PRIVATE_MODULES: bool>(
     }
 }
 
-/// Find a module declaration or import omitted from an external crate's public hash.
+/// Find a declaration or import omitted from an external crate's public hash.
 fn omitted_binding_by_name(tcx: TyCtxt<'_>, base: DefId, ns: PathNS, name: Symbol) -> Option<DefId> {
     // Upstream rustc puts these bindings in `module_children`. On Ohm, CStore's
     // inherent method takes precedence and reads the omitted bindings on demand.
@@ -329,7 +329,7 @@ fn omitted_binding_by_name(tcx: TyCtxt<'_>, base: DefId, ns: PathNS, name: Symbo
         return Some(id);
     }
 
-    // A private import can be added or retargeted without changing the public hash.
+    // A private item can disappear or an import can change without affecting the public hash.
     // Track the metadata we consulted, even when the configured name is currently absent.
     if store.has_public_api_hash(base.krate) {
         let source = tcx.used_crate_source(base.krate);
@@ -340,10 +340,8 @@ fn omitted_binding_by_name(tcx: TyCtxt<'_>, base: DefId, ns: PathNS, name: Symbo
         }
     }
 
-    // A configured name can identify an item even if Rust code must use a different path.
-    child
-        .filter(|child| !child.reexport_chain.is_empty())
-        .and_then(|child| child.res.opt_def_id())
+    // A library and its binary can share a lint setting that names a private library item.
+    child.and_then(|child| child.res.opt_def_id())
 }
 
 fn item_child_by_name(tcx: TyCtxt<'_>, def_id: DefId, ns: PathNS, name: Symbol) -> Option<DefId> {

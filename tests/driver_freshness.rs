@@ -116,6 +116,33 @@ fn configured_paths_match_public_reexports_from_private_modules() {
 }
 
 #[test]
+fn configured_paths_match_private_library_items_in_the_binary() {
+    let root = fix_project();
+    let dir = root.path();
+    fs::write(dir.join("src/main.rs"), "fn main() { fix_order::run(); }\n").unwrap();
+    fs::write(
+        dir.join("clippy.toml"),
+        "disallowed-methods = [\"fix_order::legacy\"]\n",
+    )
+    .unwrap();
+
+    for (source, exists) in [
+        ("fn legacy() {}\npub fn run() { legacy(); }\n", true),
+        ("pub fn run() {}\n", false),
+        ("fn legacy() {}\npub fn run() { legacy(); }\n", true),
+    ] {
+        fs::write(dir.join("src/lib.rs"), source).unwrap();
+        let output = run_clippy(dir, &["--bins", "--message-format=json"]);
+        let missing_in_binary = output.lines().any(|line| {
+            let event: serde_json::Value = serde_json::from_str(line).unwrap();
+            event["target"]["kind"][0] == "bin" && line.contains("does not refer to a reachable function")
+        });
+        assert_eq!(output.contains("use of a disallowed method"), exists, "{output}");
+        assert_eq!(missing_in_binary, !exists, "{output}");
+    }
+}
+
+#[test]
 fn configured_paths_follow_changes_to_hidden_imports() {
     let root = keys_project();
     let dir = root.path();
