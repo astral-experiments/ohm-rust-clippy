@@ -197,6 +197,28 @@ fn configured_paths_follow_changes_to_hidden_imports() {
 }
 
 #[test]
+fn configured_type_follows_a_module_replaced_by_an_import() {
+    let root = keys_project();
+    let dir = root.path();
+    fs::write(dir.join("src/lib.rs"), "pub fn take(_: keys::Key) {}\n").unwrap();
+    fs::write(
+        dir.join("clippy.toml"),
+        "disallowed-types = [{ path = \"keys::banned\", allow-invalid = true }]\n",
+    )
+    .unwrap();
+
+    for (binding, banned) in [
+        ("mod banned {}", false),
+        ("#[allow(unused_imports)] use Key as banned;", true),
+        ("mod banned {}", false),
+    ] {
+        fs::write(dir.join("keys/src/lib.rs"), format!("pub struct Key;\n{binding}\n")).unwrap();
+        let output = run_clippy(dir, &["--no-deps", "--message-format=json"]);
+        assert_eq!(output.contains("clippy::disallowed_types"), banned, "{output}");
+    }
+}
+
+#[test]
 fn automatic_fixes_preserve_suggestion_order_after_a_regular_check() {
     let root = fix_project();
     let source = root.path().join("src/lib.rs");
