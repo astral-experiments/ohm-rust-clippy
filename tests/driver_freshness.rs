@@ -116,6 +116,44 @@ fn configured_paths_match_public_reexports_from_private_modules() {
 }
 
 #[test]
+fn configured_paths_match_private_library_items_in_the_binary() {
+    let root = fix_project();
+    let dir = root.path();
+    fs::write(dir.join("src/main.rs"), "fn main() { fix_order::run(); }\n").unwrap();
+    fs::write(
+        dir.join("clippy.toml"),
+        "disallowed-methods = [\"fix_order::legacy\"]\n",
+    )
+    .unwrap();
+
+    for (item, warning) in [
+        ("fn legacy() {}", None),
+        ("", Some("does not refer to a reachable function")),
+        ("struct legacy;", Some("expected a function, found a struct")),
+        ("struct legacy(u32);", None),
+        ("fn legacy() {}", None),
+    ] {
+        let called = item.starts_with("fn");
+        let call = if called { "legacy();" } else { "" };
+        let source = format!("#![allow(non_camel_case_types, unused)]\n{item}\npub fn run() {{ {call} }}\n");
+        fs::write(dir.join("src/lib.rs"), source).unwrap();
+        let output = run_clippy(dir, &["--bins", "--message-format=json"]);
+        let warnings: Vec<_> = output
+            .lines()
+            .filter(|line| {
+                let event: serde_json::Value = serde_json::from_str(line).unwrap();
+                event["target"]["kind"][0] == "bin" && event["message"]["level"] == "warning"
+            })
+            .collect();
+        assert_eq!(output.contains("use of a disallowed method"), called, "{output}");
+        assert_eq!(warnings.len(), usize::from(warning.is_some()), "{output}");
+        if let Some(warning) = warning {
+            assert!(warnings[0].contains(warning), "{output}");
+        }
+    }
+}
+
+#[test]
 fn configured_paths_follow_changes_to_hidden_imports() {
     let root = keys_project();
     let dir = root.path();
@@ -139,6 +177,8 @@ fn configured_paths_follow_changes_to_hidden_imports() {
         ("pub use super::Alpha as Restricted;", true),
         ("pub(crate) use super::Alpha as Restricted;", true),
         ("use super::Bravo as Restricted;", false),
+        ("struct Hidden; use Hidden as Restricted;", false),
+        ("trait Hidden { fn use_it(&self); } use Hidden as Restricted;", false),
         ("use super::Alpha as Restricted;", true),
     ] {
         fs::write(
