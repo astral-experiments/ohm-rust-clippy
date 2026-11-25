@@ -319,15 +319,17 @@ fn lookup_with_base(
         id: base,
         private: false,
     };
-    let child_by_name = |base: ConfiguredItem, ns, name| match item_child_by_name(tcx, base, ns, name) {
-        None if search != Search::Public && !base.private => omitted_binding_by_name(tcx, base.id, ns, name, search),
+    let child_by_name = |base: ConfiguredItem, ns, name, is_last| match item_child_by_name(tcx, base, ns, name) {
+        None if search != Search::Public && !base.private => {
+            omitted_binding_by_name(tcx, base.id, ns, name, search, is_last)
+        },
         child => child.map(|id| ConfiguredItem { id, ..base }),
     };
 
     loop {
         match *path {
             [segment] => {
-                if let Some(item) = child_by_name(base, ns, segment) {
+                if let Some(item) = child_by_name(base, ns, segment, true) {
                     emit(item);
                 }
 
@@ -348,7 +350,7 @@ fn lookup_with_base(
             },
             [segment, ref rest @ ..] => {
                 path = rest;
-                let Some(child) = child_by_name(base, PathNS::Type, segment) else {
+                let Some(child) = child_by_name(base, PathNS::Type, segment, false) else {
                     return;
                 };
                 base = child;
@@ -365,6 +367,7 @@ fn omitted_binding_by_name(
     ns: PathNS,
     name: Symbol,
     search: Search,
+    is_last: bool,
 ) -> Option<ConfiguredItem> {
     // Upstream rustc puts these bindings in `module_children`. On Ohm, CStore's
     // inherent method takes precedence and reads the omitted bindings on demand.
@@ -390,16 +393,14 @@ fn omitted_binding_by_name(
     let child = store
         .private_module_children_untracked(tcx, base)
         .find(|child| child.ident.name == name && ns.matches(child.res.ns()));
-    if let Some(child) = &child
-        && let Res::Def(DefKind::Mod, id) = child.res
-        && child.reexport_chain.is_empty()
-    {
-        return Some(ConfiguredItem { id, private: false });
-    }
+    let module = child
+        .as_ref()
+        .is_some_and(|child| matches!(child.res, Res::Def(DefKind::Mod, _)) && child.reexport_chain.is_empty());
 
-    // A private item can disappear or an import can change without affecting the public hash.
-    // Track the metadata we consulted, even when the configured name is currently absent.
-    if store.has_public_api_hash(base.krate) {
+    // A module used as a prefix lets the next lookup track the child. At the end of the
+    // path, even a module or a missing name could become a private import of a banned item
+    // without changing the public hash.
+    if (is_last || !module) && store.has_public_api_hash(base.krate) {
         let source = tcx.used_crate_source(base.krate);
         if let Some(path) = source.rmeta.as_ref().or(source.rlib.as_ref()).or(source.dylib.as_ref())
             && let Some(path) = path.to_str()
@@ -409,7 +410,7 @@ fn omitted_binding_by_name(
     }
 
     let child = child?;
-    if search == Search::Imports && child.reexport_chain.is_empty() {
+    if search == Search::Imports && !module && child.reexport_chain.is_empty() {
         return None;
     }
     let id = child.res.opt_def_id()?;
