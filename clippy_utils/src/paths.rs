@@ -165,12 +165,12 @@ pub static ONCE_CELL_SYNC_LAZY_NEW: PathLookup = value_path!(once_cell::sync::La
 
 // Paths for internal lints go in `clippy_lints_internal/src/internal_paths.rs`
 
-/// Resolve a path string, including the original module path of a re-exported item.
+/// Resolve a path string, including private declarations and imports named in lint settings.
 ///
 /// This function is expensive and should be used sparingly.
 pub fn lookup_path_str(tcx: TyCtxt<'_>, ns: PathNS, path: &str) -> Vec<DefId> {
     let path: Vec<Symbol> = path.split("::").map(Symbol::intern).collect();
-    lookup_path_impl(tcx, ns, &path, Search::Imports, |item| item.id)
+    lookup_path_impl(tcx, ns, &path, Search::Declarations, |item| item.id)
 }
 
 /// Resolves a def path like `std::vec::Vec`.
@@ -247,7 +247,6 @@ pub fn lookup_configured_path(tcx: TyCtxt<'_>, ns: PathNS, path: &[Symbol]) -> V
 #[derive(Clone, Copy, PartialEq)]
 enum Search {
     Public,
-    Imports,
     Declarations,
 }
 
@@ -334,8 +333,8 @@ fn lookup_with_base(
         private: false,
     };
     let child_by_name = |base: ConfiguredItem, ns, name, is_last| match item_child_by_name(tcx, base, ns, name) {
-        None if search != Search::Public && !base.private => {
-            omitted_binding_by_name(tcx, base.id, ns, name, search, is_last)
+        None if search == Search::Declarations && !base.private => {
+            omitted_binding_by_name(tcx, base.id, ns, name, is_last)
         },
         child => child.map(|id| ConfiguredItem { id, ..base }),
     };
@@ -380,7 +379,6 @@ fn omitted_binding_by_name(
     base: DefId,
     ns: PathNS,
     name: Symbol,
-    search: Search,
     is_last: bool,
 ) -> Option<ConfiguredItem> {
     // Upstream rustc puts these bindings in `module_children`. On Ohm, CStore's
@@ -424,9 +422,6 @@ fn omitted_binding_by_name(
     }
 
     let child = child?;
-    if search == Search::Imports && !module && child.reexport_chain.is_empty() {
-        return None;
-    }
     let id = child.res.opt_def_id()?;
     // A private import may itself name a private definition in the same crate.
     Some(ConfiguredItem {
