@@ -219,6 +219,36 @@ fn configured_type_follows_a_module_replaced_by_an_import() {
 }
 
 #[test]
+fn ignored_interior_mutability_follows_private_field_types() {
+    let root = keys_project();
+    let dir = root.path();
+    fs::write(
+        dir.join("clippy.toml"),
+        "ignore-interior-mutability = [\"keys::Counter\"]\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/lib.rs"),
+        "#![warn(clippy::mutable_key_type)]\npub fn take(_: std::collections::HashMap<keys::Key, u32>) {}\n",
+    )
+    .unwrap();
+
+    for field in ["Counter", "Other", "Counter"] {
+        fs::write(
+            dir.join("keys/src/lib.rs"),
+            format!("#![allow(dead_code)]\nstruct {field}(std::cell::Cell<u32>);\npub struct Key({field});\n"),
+        )
+        .unwrap();
+        let output = run_clippy(dir, &["--message-format=json", "--no-deps"]);
+        assert_eq!(
+            output.contains("clippy::mutable_key_type"),
+            field == "Other",
+            "{output}"
+        );
+    }
+}
+
+#[test]
 fn unwrap_setting_follows_private_type_aliases() {
     let root = fix_project();
     let dir = root.path();
