@@ -72,6 +72,26 @@ fn remove_unwrap(cx: &LateContext<'_>, expr: &hir::Expr<'_>, value: &hir::Expr<'
     };
     let precedence = cx.precedence(value);
     let group = match parent.kind {
+        // A closure can consume the following `&&` in a let chain. In a lone
+        // if/while let, parentheses around it trigger `unused_parens`.
+        E::Let(..)
+            if let E::Closure(closure) = value.kind
+                && get_parent_expr(cx, parent).is_some_and(|expr| matches!(expr.kind, E::If(..))) =>
+        {
+            let body = cx.tcx.hir_body(closure.body).value;
+            let body = clippy_utils::get_async_closure_expr(cx.tcx, body).unwrap_or(body);
+            if matches!(body.kind, E::Struct(..) | E::Ret(..) | E::Closure(..))
+                || body.span.is_desugaring(DesugaringKind::RangeExpr)
+            {
+                // Keep the body in expression position. Wrapping just the body
+                // in a block can turn its leading `{ x }` into a statement.
+                edits[0].1.push_str("{ ");
+                edits[1].1.push_str(" }");
+            } else {
+                group_before_block(cx, body, &mut edits);
+            }
+            false
+        },
         E::Let(..) if needs_par_as_let_scrutinee(precedence) => true,
         E::Call(..) if parent.span.is_desugaring(DesugaringKind::ForLoop) => {
             group_before_block(cx, value, &mut edits);

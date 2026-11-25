@@ -264,12 +264,18 @@ pub fn f(a: u8, b: u8) -> u8 {
     let x = std::hint::black_box(Some(a | b).unwrap());
     Some(a ^ b).unwrap().wrapping_add(Some(x & b).unwrap())
 }
+#[allow(irrefutable_let_patterns)]
 pub fn check(a: bool, b: bool) {
     struct Mask { bit: bool }
     if Some(Mask { bit: a }.bit | b).unwrap() {}
     if Some(Mask { bit: a }.bit).unwrap() {}
     match Some(Mask { bit: a }).unwrap() { _ => () }
     if let true = Some(a || b).unwrap() {}
+    if let read = Some(|| Mask { bit: a }).unwrap() { let _ = read().bit; }
+    while let read = Some(|| a).unwrap() { let _ = read(); break; }
+    if let read = Some(|| a).unwrap() && read() {}
+    if let read = Some(async || { a as u8 } + 1).unwrap() { let _ = read(); }
+    if let range = Some(|| { a as u8 }..3).unwrap() { let _ = range().end; }
     match Some(a | b).unwrap() { _ => () }
     for _ in Some(&[a, b]).unwrap() {}
 }
