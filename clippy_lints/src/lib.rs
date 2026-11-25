@@ -613,7 +613,7 @@ rustc_lint::late_lint_methods!(
         IndexRefutableSlice: index_refutable_slice::IndexRefutableSlice = index_refutable_slice::IndexRefutableSlice::new(conf),
         Shadow: shadow::Shadow = <shadow::Shadow>::default(),
         InconsistentStructConstructor: inconsistent_struct_constructor::InconsistentStructConstructor = inconsistent_struct_constructor::InconsistentStructConstructor::new( conf, ),
-        Methods: methods::Methods = methods::Methods::new(conf, format_args.clone()),
+        Methods: methods::Methods<'tcx> = methods::Methods::new(conf, format_args.clone()),
         UnitTypes: unit_types::UnitTypes = unit_types::UnitTypes::new(format_args.clone()),
         UnitExpressions: unit_types::UnitExpressions = unit_types::UnitExpressions,
         Loops: loops::Loops = loops::Loops::new(conf),

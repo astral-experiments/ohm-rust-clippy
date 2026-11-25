@@ -219,6 +219,34 @@ fn configured_type_follows_a_module_replaced_by_an_import() {
 }
 
 #[test]
+fn unwrap_setting_follows_private_type_aliases() {
+    let root = fix_project();
+    let dir = root.path();
+    fs::write(dir.join("clippy.toml"), "allow-unwrap-types = [\"fix_order::Reply\"]\n").unwrap();
+    fs::write(
+        dir.join("src/main.rs"),
+        "#![warn(clippy::unwrap_used)]\nfn main() { let _ = fix_order::input().unwrap(); }\n",
+    )
+    .unwrap();
+
+    for (declaration, allowed) in [
+        ("type Reply = Option<u32>;", true),
+        ("type Reply = Option<u64>;", false),
+        ("type Reply = Option<u32>;", true),
+        ("type Inner = Option<u32>; use Inner as Reply;", true),
+        ("type Inner = Option<u64>; use Inner as Reply;", false),
+    ] {
+        fs::write(
+            dir.join("src/lib.rs"),
+            format!("{declaration}\npub fn input() -> Option<u32> {{ let _: Reply = None; Some(42) }}\n"),
+        )
+        .unwrap();
+        let output = run_clippy(dir, &["--bins", "--message-format=json"]);
+        assert_eq!(output.contains("clippy::unwrap_used"), !allowed, "{output}");
+    }
+}
+
+#[test]
 fn automatic_fixes_preserve_suggestion_order_after_a_regular_check() {
     let root = fix_project();
     let source = root.path().join("src/lib.rs");
