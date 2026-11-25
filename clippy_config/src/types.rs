@@ -248,7 +248,7 @@ pub fn create_disallowed_map<const REPLACEMENT_ALLOWED: bool>(
         let path = &*disallowed_path.path.node;
         let sym_path: Vec<Symbol> = path.split("::").map(Symbol::intern).collect();
         let mut resolutions = lookup_configured_path(tcx, ns, &sym_path);
-        resolutions.retain(|&def_id| def_kind_predicate(tcx.def_kind(def_id)));
+        resolutions.retain(|item| def_kind_predicate(item.kind(tcx)));
 
         let (prim_ty, found_prim_ty) = if let &[name] = sym_path.as_slice()
             && let Some(prim) = PrimTy::from_name(name)
@@ -266,9 +266,9 @@ pub fn create_disallowed_map<const REPLACEMENT_ALLOWED: bool>(
             && (sym_path.len() < 2 || !find_crates(tcx, sym_path[0]).is_empty())
         {
             // Relookup the path in an arbitrary namespace to get a good `expected, found` message
-            let found_def_ids = lookup_configured_path(tcx, PathNS::Arbitrary, &sym_path);
-            let message = if let Some(&def_id) = found_def_ids.first() {
-                let (article, description) = tcx.article_and_description(def_id);
+            let found = lookup_configured_path(tcx, PathNS::Arbitrary, &sym_path);
+            let message = if let Some(item) = found.first() {
+                let (article, description) = item.article_and_description(tcx);
                 format!("expected a {predicate_description}, found {article} {description}")
             } else if found_prim_ty {
                 format!("expected a {predicate_description}, found a primitive type")
@@ -282,8 +282,8 @@ pub fn create_disallowed_map<const REPLACEMENT_ALLOWED: bool>(
                 .emit();
         }
 
-        for def_id in resolutions {
-            def_ids.insert(def_id, (path, disallowed_path));
+        for item in resolutions {
+            def_ids.insert(item.id, (path, disallowed_path));
         }
         if let Some(ty) = prim_ty {
             prim_tys.insert(ty, (path, disallowed_path));

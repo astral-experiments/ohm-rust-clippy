@@ -170,7 +170,7 @@ pub static ONCE_CELL_SYNC_LAZY_NEW: PathLookup = value_path!(once_cell::sync::La
 /// This function is expensive and should be used sparingly.
 pub fn lookup_path_str(tcx: TyCtxt<'_>, ns: PathNS, path: &str) -> Vec<DefId> {
     let path: Vec<Symbol> = path.split("::").map(Symbol::intern).collect();
-    lookup_configured_path(tcx, ns, &path)
+    lookup_path_impl(tcx, ns, &path, Search::Imports, |item| item.id)
 }
 
 /// Resolves a def path like `std::vec::Vec`.
@@ -185,16 +185,66 @@ pub fn lookup_path_str(tcx: TyCtxt<'_>, ns: PathNS, path: &str) -> Vec<DefId> {
 /// [2]: https://doc.rust-lang.org/std/boxed/struct.Box.html#method.downcast-1
 /// [3]: https://doc.rust-lang.org/std/boxed/struct.Box.html#method.downcast-2
 pub fn lookup_path(tcx: TyCtxt<'_>, ns: PathNS, path: &[Symbol]) -> Vec<DefId> {
-    lookup_path_impl::<false>(tcx, ns, path)
+    lookup_path_impl(tcx, ns, path, Search::Public, |item| item.id)
+}
+
+/// A definition named in a lint setting.
+///
+/// An omitted declaration and its children can change without changing the public hash.
+/// For those lookups, read from the current metadata instead of caching query results
+/// against that hash. The metadata file is also an input in Cargo's dep-info.
+#[derive(Clone, Copy)]
+pub struct ConfiguredItem {
+    /// The definition to match at uses of the configured name.
+    pub id: DefId,
+    private: bool,
+}
+
+impl ConfiguredItem {
+    /// Read an omitted definition from this session's metadata.
+    pub fn kind(self, tcx: TyCtxt<'_>) -> DefKind {
+        if self.private {
+            CStore::from_tcx(tcx).def_kind_untracked(self.id)
+        } else {
+            tcx.def_kind(self.id)
+        }
+    }
+
+    /// Describe a mismatched setting without caching queries about private declarations.
+    pub fn article_and_description(self, tcx: TyCtxt<'_>) -> (&'static str, &'static str) {
+        if !self.private {
+            return tcx.article_and_description(self.id);
+        }
+        let kind = self.kind(tcx);
+        if kind == DefKind::AssocFn && (tcx.query_system.extern_providers.associated_item)(tcx, self.id).is_method() {
+            ("a", "method")
+        } else {
+            (kind.article(), kind.descr(self.id))
+        }
+    }
 }
 
 /// Resolve a lint setting that can name private items and imports.
-pub fn lookup_configured_path(tcx: TyCtxt<'_>, ns: PathNS, path: &[Symbol]) -> Vec<DefId> {
-    lookup_path_impl::<true>(tcx, ns, path)
+pub fn lookup_configured_path(tcx: TyCtxt<'_>, ns: PathNS, path: &[Symbol]) -> Vec<ConfiguredItem> {
+    lookup_path_impl(tcx, ns, path, Search::Declarations, |item| item)
+}
+
+/// How far to look beyond the compiler's regular module children.
+#[derive(Clone, Copy, PartialEq)]
+enum Search {
+    Public,
+    Imports,
+    Declarations,
 }
 
 /// Resolve each crate version separately, including versions with different public exports.
-fn lookup_path_impl<const PRIVATE_MODULES: bool>(tcx: TyCtxt<'_>, ns: PathNS, path: &[Symbol]) -> Vec<DefId> {
+fn lookup_path_impl<T>(
+    tcx: TyCtxt<'_>,
+    ns: PathNS,
+    path: &[Symbol],
+    search: Search,
+    select: impl Fn(ConfiguredItem) -> T,
+) -> Vec<T> {
     let (root, rest) = match *path {
         [] | [_] => return Vec::new(),
         [root, ref rest @ ..] => (root, rest),
@@ -202,7 +252,7 @@ fn lookup_path_impl<const PRIVATE_MODULES: bool>(tcx: TyCtxt<'_>, ns: PathNS, pa
 
     let mut out = Vec::new();
     for &base in find_crates(tcx, root).iter().chain(find_primitive_impls(tcx, root)) {
-        lookup_with_base::<PRIVATE_MODULES>(tcx, base, ns, rest, &mut out);
+        lookup_with_base(tcx, base, ns, rest, search, |item| out.push(select(item)));
     }
     out
 }
@@ -257,30 +307,42 @@ fn find_primitive_impls(tcx: TyCtxt<'_>, name: Symbol) -> &[DefId] {
 }
 
 /// Resolves a def path like `vec::Vec` with the base `std`.
-fn lookup_with_base<const PRIVATE_MODULES: bool>(
+fn lookup_with_base(
     tcx: TyCtxt<'_>,
-    mut base: DefId,
+    base: DefId,
     ns: PathNS,
     mut path: &[Symbol],
-    out: &mut Vec<DefId>,
+    search: Search,
+    mut emit: impl FnMut(ConfiguredItem),
 ) {
-    let child_by_name = |base, ns, name| match item_child_by_name(tcx, base, ns, name) {
-        None if PRIVATE_MODULES => omitted_binding_by_name(tcx, base, ns, name),
-        child => child,
+    let mut base = ConfiguredItem {
+        id: base,
+        private: false,
+    };
+    let child_by_name = |base: ConfiguredItem, ns, name| match item_child_by_name(tcx, base, ns, name) {
+        None if search != Search::Public && !base.private => omitted_binding_by_name(tcx, base.id, ns, name, search),
+        child => child.map(|id| ConfiguredItem { id, ..base }),
     };
 
     loop {
         match *path {
             [segment] => {
-                out.extend(child_by_name(base, ns, segment));
+                if let Some(item) = child_by_name(base, ns, segment) {
+                    emit(item);
+                }
 
                 // When the current def_id is e.g. `struct S`, check the impl items in
                 // `impl S { ... }`
-                let inherent_impl_children = tcx
-                    .inherent_impls(base)
-                    .iter()
-                    .filter_map(|&impl_def_id| item_child_by_name(tcx, impl_def_id, ns, segment));
-                out.extend(inherent_impl_children);
+                let impls = if base.private {
+                    (tcx.query_system.extern_providers.inherent_impls)(tcx, base.id)
+                } else {
+                    tcx.inherent_impls(base.id)
+                };
+                for &id in impls {
+                    if let Some(item) = item_child_by_name(tcx, ConfiguredItem { id, ..base }, ns, segment) {
+                        emit(ConfiguredItem { id: item, ..base });
+                    }
+                }
 
                 return;
             },
@@ -297,7 +359,13 @@ fn lookup_with_base<const PRIVATE_MODULES: bool>(
 }
 
 /// Find a declaration or import omitted from an external crate's public hash.
-fn omitted_binding_by_name(tcx: TyCtxt<'_>, base: DefId, ns: PathNS, name: Symbol) -> Option<DefId> {
+fn omitted_binding_by_name(
+    tcx: TyCtxt<'_>,
+    base: DefId,
+    ns: PathNS,
+    name: Symbol,
+    search: Search,
+) -> Option<ConfiguredItem> {
     // Upstream rustc puts these bindings in `module_children`. On Ohm, CStore's
     // inherent method takes precedence and reads the omitted bindings on demand.
     #[allow(dead_code, reason = "Only used when building with upstream rustc")]
@@ -326,7 +394,7 @@ fn omitted_binding_by_name(tcx: TyCtxt<'_>, base: DefId, ns: PathNS, name: Symbo
         && let Res::Def(DefKind::Mod, id) = child.res
         && child.reexport_chain.is_empty()
     {
-        return Some(id);
+        return Some(ConfiguredItem { id, private: false });
     }
 
     // A private item can disappear or an import can change without affecting the public hash.
@@ -340,15 +408,23 @@ fn omitted_binding_by_name(tcx: TyCtxt<'_>, base: DefId, ns: PathNS, name: Symbo
         }
     }
 
-    // A library and its binary can share a lint setting that names a private library item.
-    child.and_then(|child| child.res.opt_def_id())
+    let child = child?;
+    if search == Search::Imports && child.reexport_chain.is_empty() {
+        return None;
+    }
+    let id = child.res.opt_def_id()?;
+    // A private import may itself name a private definition in the same crate.
+    Some(ConfiguredItem {
+        id,
+        private: id.krate == base.krate && !matches!(child.res, Res::Def(DefKind::Mod, _)),
+    })
 }
 
-fn item_child_by_name(tcx: TyCtxt<'_>, def_id: DefId, ns: PathNS, name: Symbol) -> Option<DefId> {
-    if let Some(local_id) = def_id.as_local() {
+fn item_child_by_name(tcx: TyCtxt<'_>, item: ConfiguredItem, ns: PathNS, name: Symbol) -> Option<DefId> {
+    if let Some(local_id) = item.id.as_local() {
         local_item_child_by_name(tcx, local_id, ns, name)
     } else {
-        non_local_item_child_by_name(tcx, def_id, ns, name)
+        non_local_item_child_by_name(tcx, item, ns, name)
     }
 }
 
@@ -433,25 +509,34 @@ fn local_item_child_by_name(tcx: TyCtxt<'_>, local_id: LocalDefId, ns: PathNS, n
     }
 }
 
-fn non_local_item_child_by_name(tcx: TyCtxt<'_>, def_id: DefId, ns: PathNS, name: Symbol) -> Option<DefId> {
-    match tcx.def_kind(def_id) {
-        DefKind::Mod | DefKind::Enum | DefKind::Trait => tcx.module_children(def_id).iter().find_map(|child| {
-            if child.ident.name == name && ns.matches(child.res.ns()) {
-                child.res.opt_def_id()
+fn non_local_item_child_by_name(tcx: TyCtxt<'_>, item: ConfiguredItem, ns: PathNS, name: Symbol) -> Option<DefId> {
+    let providers = &tcx.query_system.extern_providers;
+    match item.kind(tcx) {
+        DefKind::Mod | DefKind::Enum | DefKind::Trait => {
+            let children = if item.private {
+                (providers.module_children)(tcx, item.id)
             } else {
-                None
-            }
-        }),
-        DefKind::Impl { .. } => tcx
-            .associated_item_def_ids(def_id)
-            .iter()
-            .copied()
-            .find(|&assoc_def_id| tcx.item_name(assoc_def_id) == name && ns.matches(tcx.def_kind(assoc_def_id).ns())),
-        DefKind::Struct => tcx
-            .associated_item_def_ids(def_id)
-            .iter()
-            .copied()
-            .find(|&assoc_def_id| tcx.item_name(assoc_def_id) == name),
+                tcx.module_children(item.id)
+            };
+            children.iter().find_map(|child| {
+                if child.ident.name == name && ns.matches(child.res.ns()) {
+                    child.res.opt_def_id()
+                } else {
+                    None
+                }
+            })
+        },
+        kind @ (DefKind::Impl { .. } | DefKind::Struct) => {
+            let ids = if item.private {
+                (providers.associated_item_def_ids)(tcx, item.id)
+            } else {
+                tcx.associated_item_def_ids(item.id)
+            };
+            ids.iter().copied().find(|&id| {
+                tcx.item_name(id) == name
+                    && (kind == DefKind::Struct || ns.matches(ConfiguredItem { id, ..item }.kind(tcx).ns()))
+            })
+        },
         _ => None,
     }
 }
