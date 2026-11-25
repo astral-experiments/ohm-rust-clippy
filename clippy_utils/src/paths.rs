@@ -210,6 +210,20 @@ impl ConfiguredItem {
         }
     }
 
+    /// Expand a configured type alias with its generic parameters intact. A private alias
+    /// can change its target even when incremental queries for the dependency are green.
+    pub fn alias_ty(self, tcx: TyCtxt<'_>) -> Option<Ty<'_>> {
+        if self.kind(tcx) != DefKind::TyAlias {
+            return None;
+        }
+        let ty = if self.private {
+            (tcx.query_system.extern_providers.type_of)(tcx, self.id)
+        } else {
+            tcx.type_of(self.id)
+        };
+        Some(ty.instantiate_identity().skip_norm_wip())
+    }
+
     /// Describe a mismatched setting without caching queries about private declarations.
     pub fn article_and_description(self, tcx: TyCtxt<'_>) -> (&'static str, &'static str) {
         if !self.private {

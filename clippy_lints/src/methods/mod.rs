@@ -167,7 +167,7 @@ use clippy_utils::{contains_return, iter_input_pats, peel_blocks, sym};
 use rustc_data_structures::fx::FxHashSet;
 use rustc_hir::{self as hir, Expr, ExprKind, Node, Stmt, StmtKind, TraitItem, TraitItemKind};
 use rustc_lint::{LateContext, LateLintPass, LintContext as _, impl_lint_pass};
-use rustc_middle::ty::TraitRef;
+use rustc_middle::ty::{TraitRef, Ty};
 use rustc_span::{Span, Symbol};
 
 use crate::matches::manual_filter;
@@ -5000,7 +5000,7 @@ declare_clippy_lint! {
     "Check for offset calculations on raw pointers to zero-sized types"
 }
 
-impl_lint_pass!(Methods => [
+impl_lint_pass!(Methods<'_> => [
     BIND_INSTEAD_OF_MAP,
     BYTES_COUNT_TO_LEN,
     BYTES_NTH,
@@ -5166,7 +5166,7 @@ impl_lint_pass!(Methods => [
 ]);
 
 #[expect(clippy::struct_excessive_bools)]
-pub struct Methods {
+pub struct Methods<'tcx> {
     avoid_breaking_exported_api: bool,
     msrv: Msrv,
     allow_expect_in_tests: bool,
@@ -5177,10 +5177,10 @@ pub struct Methods {
     format_args: FormatArgsStorage,
     allow_unwrap_types: Vec<String>,
     unwrap_allowed_ids: FxHashSet<rustc_hir::def_id::DefId>,
-    unwrap_allowed_aliases: Vec<rustc_hir::def_id::DefId>,
+    unwrap_allowed_aliases: Vec<Ty<'tcx>>,
 }
 
-impl Methods {
+impl Methods<'_> {
     pub fn new(conf: &'static Conf, format_args: FormatArgsStorage) -> Self {
         let mut allowed_dotfiles: FxHashSet<_> = conf.allowed_dotfiles.iter().map(|s| &**s).collect();
         allowed_dotfiles.extend(DEFAULT_ALLOWED_DOTFILES);
@@ -5215,15 +5215,15 @@ pub fn method_call<'tcx>(recv: &'tcx Expr<'tcx>) -> Option<(Symbol, &'tcx Expr<'
     }
 }
 
-impl<'tcx> LateLintPass<'tcx> for Methods {
+impl<'tcx> LateLintPass<'tcx> for Methods<'tcx> {
     fn check_crate(&mut self, cx: &LateContext<'tcx>) {
         for s in &self.allow_unwrap_types {
-            let def_ids = clippy_utils::paths::lookup_path_str(cx.tcx, clippy_utils::paths::PathNS::Type, s);
-            for def_id in def_ids {
-                if cx.tcx.def_kind(def_id) == rustc_hir::def::DefKind::TyAlias {
-                    self.unwrap_allowed_aliases.push(def_id);
+            let path: Vec<_> = s.split("::").map(Symbol::intern).collect();
+            for item in clippy_utils::paths::lookup_configured_path(cx.tcx, clippy_utils::paths::PathNS::Type, &path) {
+                if let Some(ty) = item.alias_ty(cx.tcx) {
+                    self.unwrap_allowed_aliases.push(ty);
                 } else {
-                    self.unwrap_allowed_ids.insert(def_id);
+                    self.unwrap_allowed_ids.insert(item.id);
                 }
             }
         }
@@ -5346,9 +5346,9 @@ impl<'tcx> LateLintPass<'tcx> for Methods {
     }
 }
 
-impl Methods {
+impl<'tcx> Methods<'tcx> {
     #[expect(clippy::too_many_lines)]
-    fn check_methods<'tcx>(&self, cx: &LateContext<'tcx>, expr: &'tcx Expr<'_>) {
+    fn check_methods(&self, cx: &LateContext<'tcx>, expr: &'tcx Expr<'_>) {
         // Handle method calls whose receiver and arguments may not come from expansion
         if let Some((name, recv, args, span, call_span)) = method_call(expr) {
             match (name, args) {

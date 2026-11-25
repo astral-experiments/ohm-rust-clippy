@@ -5,7 +5,7 @@ use clippy_utils::{is_in_test, is_inside_always_const_context, is_lint_allowed};
 use rustc_hir::Expr;
 use rustc_hir::def::DefKind;
 use rustc_lint::{LateContext, Lint};
-use rustc_middle::ty;
+use rustc_middle::ty::{self, Ty};
 use rustc_span::sym;
 
 use super::{EXPECT_USED, UNWRAP_USED};
@@ -37,15 +37,15 @@ impl Variant {
 /// Lint usage of `unwrap` or `unwrap_err` for `Result` and `unwrap()` for `Option` (and their
 /// `expect` counterparts).
 #[allow(clippy::too_many_arguments)]
-pub(super) fn check(
-    cx: &LateContext<'_>,
+pub(super) fn check<'tcx>(
+    cx: &LateContext<'tcx>,
     expr: &Expr<'_>,
     recv: &Expr<'_>,
     is_err: bool,
     allow_unwrap_in_consts: bool,
     allow_unwrap_in_tests: bool,
     unwrap_allowed_ids: &rustc_data_structures::fx::FxHashSet<rustc_hir::def_id::DefId>,
-    unwrap_allowed_aliases: &[rustc_hir::def_id::DefId],
+    unwrap_allowed_aliases: &[Ty<'tcx>],
     variant: Variant,
 ) {
     let ty = cx.typeck_results().expr_ty(recv).peel_refs();
@@ -73,8 +73,7 @@ pub(super) fn check(
         return;
     }
 
-    for &def_id in unwrap_allowed_aliases {
-        let alias_ty = cx.tcx.type_of(def_id).instantiate_identity().skip_norm_wip();
+    for &alias_ty in unwrap_allowed_aliases {
         if let (ty::Adt(adt, substs), ty::Adt(alias_adt, alias_substs)) = (ty.kind(), alias_ty.kind())
             && adt.did() == alias_adt.did()
         {
@@ -129,8 +128,8 @@ pub(super) fn check(
 }
 
 #[expect(clippy::too_many_arguments, clippy::fn_params_excessive_bools)]
-pub(super) fn check_call(
-    cx: &LateContext<'_>,
+pub(super) fn check_call<'tcx>(
+    cx: &LateContext<'tcx>,
     expr: &Expr<'_>,
     func: &Expr<'_>,
     args: &[Expr<'_>],
@@ -139,7 +138,7 @@ pub(super) fn check_call(
     allow_expect_in_consts: bool,
     allow_expect_in_tests: bool,
     unwrap_allowed_ids: &rustc_data_structures::fx::FxHashSet<rustc_hir::def_id::DefId>,
-    unwrap_allowed_aliases: &[rustc_hir::def_id::DefId],
+    unwrap_allowed_aliases: &[Ty<'tcx>],
 ) {
     let Some(recv) = args.first() else {
         return;
