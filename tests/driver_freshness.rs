@@ -116,7 +116,7 @@ fn configured_paths_match_public_reexports_from_private_modules() {
 }
 
 #[test]
-fn configured_paths_follow_changes_to_hidden_public_reexports() {
+fn configured_paths_follow_changes_to_hidden_imports() {
     let root = keys_project();
     let dir = root.path();
     fs::write(
@@ -137,6 +137,9 @@ fn configured_paths_follow_changes_to_hidden_public_reexports() {
         ("pub use super::Alpha as Restricted;", true),
         ("pub use super::Bravo as Restricted;", false),
         ("pub use super::Alpha as Restricted;", true),
+        ("pub(crate) use super::Alpha as Restricted;", true),
+        ("use super::Bravo as Restricted;", false),
+        ("use super::Alpha as Restricted;", true),
     ] {
         fs::write(
             dir.join("keys/src/lib.rs"),
