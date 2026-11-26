@@ -81,6 +81,47 @@ fn keys_project() -> tempfile::TempDir {
 }
 
 #[test]
+fn associated_items_on_reexported_types_are_certain() {
+    let root = keys_project();
+    let dir = root.path();
+    fs::write(
+        dir.join("keys/src/lib.rs"),
+        "mod raw {\n\
+             pub struct Token<'a, T>(&'a T);\n\
+             impl<T> Token<'_, T> {\n\
+                 pub const MISSING: Option<T> = None;\n\
+                 pub const MASK: u32 = 58;\n\
+                 pub fn count() -> u32 { 58 }\n\
+                 pub fn empty<'a, U: 'a>() -> Option<U> { None }\n\
+                 pub fn bytes<const N: usize>() -> Option<[u8; N]> { None }\n\
+             }\n\
+         }\n\
+         pub use raw::Token as Key;\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/lib.rs"),
+        "#![warn(clippy::manual_is_multiple_of)]\n\
+         use keys::Key;\n\
+         pub fn aligned() -> bool {\n\
+             Key::<u8>::MASK % 4 == 0 || Key::<u8>::count() % 4 == 0\n\
+         }\n\
+         #[deny(clippy::unwrap_or_default)]\n\
+         pub fn length() -> usize {\n\
+             let bytes = Key::<u8>::bytes::<>().unwrap_or(<[u8; 4]>::default());\n\
+             let values = Key::<u8>::empty::<'static>().unwrap_or(Vec::<u8>::new());\n\
+             let missing = Key::MISSING.unwrap_or(Vec::<u8>::new());\n\
+             bytes.len() + values.len() + missing.len() + Key::<u8>::empty().unwrap_or(Vec::<u8>::new()).len()\n\
+         }\n",
+    )
+    .unwrap();
+
+    let output = run_clippy(dir, &["--no-deps", "--message-format=json"]);
+    assert!(output.contains("Key::<u8>::MASK.is_multiple_of(4)"), "{output}");
+    assert!(output.contains("Key::<u8>::count().is_multiple_of(4)"), "{output}");
+}
+
+#[test]
 fn configured_paths_match_public_reexports_from_private_modules() {
     let root = keys_project();
     let dir = root.path();
