@@ -11,7 +11,7 @@
 //! As a heuristic, `expr_type_is_certain` may produce false negatives, but a false positive should
 //! be considered a bug.
 
-use crate::paths::{PathNS, lookup_path};
+use crate::paths::{PathNS, lookup_unique_child};
 use rustc_ast::{LitFloatType, LitIntType, LitKind};
 use rustc_hir::def::{DefKind, Res};
 use rustc_hir::def_id::DefId;
@@ -231,19 +231,31 @@ fn path_segment_certainty(
         // - `Option::None`             // uncertain; parent (i.e., `Option`) is uncertain
         // - `Option::<Vec<u64>>::None` // certain; parent (i.e., `Option::<..>`) is certain
         // - `Option::None::<Vec<u64>>` // certain; parent (i.e., `Option`) is uncertain
-        Res::Def(_, def_id) => {
-            // Checking `res_generics_def_id(..)` before calling `generics_of` avoids an ICE.
-            if cx.tcx.res_generics_def_id(path_segment.res).is_some() {
+        res @ Res::Def(kind, def_id) => {
+            // Use the recovered resolution here too. The original segment can still be
+            // unresolved even when the associated function has its own type parameters.
+            if cx.tcx.res_generics_def_id(res).is_some() {
                 let generics = cx.tcx.generics_of(def_id);
 
-                let own_count = generics.own_params.len();
-                let lhs = if (parent_certainty.is_certain() || generics.parent_count == 0) && own_count == 0 {
+                let recovered_fn = path_segment.res == Res::Err && kind == DefKind::AssocFn;
+                let needs_args = !generics.own_params.is_empty()
+                    && (!recovered_fn || output_uses_own_params(cx, def_id, generics.parent_count));
+                let lhs = if (parent_certainty.is_certain() || generics.parent_count == 0) && !needs_args {
                     Certainty::Certain(None)
                 } else {
                     Certainty::Uncertain
                 };
                 let rhs = path_segment
                     .args
+                    // Empty brackets and explicit or elided lifetimes can leave type and const
+                    // arguments inferred, both on the parent type and on the associated function.
+                    .filter(|_| {
+                        !path_segment.infer_args
+                            || generics
+                                .own_params
+                                .iter()
+                                .all(|p| matches!(p.kind, ty::GenericParamDefKind::Lifetime))
+                    })
                     .map_or(Certainty::Uncertain, |args| generic_args_certainty(cx, args));
                 // See the comment preceding `qpath_certainty`. `def_id` could refer to a type or a value.
                 let certainty = lhs.join_clearing_def_ids(rhs);
@@ -294,6 +306,17 @@ fn path_segment_certainty(
     certainty
 }
 
+/// Does the result depend on type or const parameters introduced by the associated function?
+/// For example, `HashMap::get_mut<Q>` returns a reference to the map's value regardless of `Q`.
+fn output_uses_own_params(cx: &LateContext<'_>, id: DefId, parent_count: usize) -> bool {
+    let output = cx.tcx.fn_sig(id).skip_binder().output().skip_binder();
+    output.walk().any(|arg| match arg.kind() {
+        GenericArgKind::Type(ty) => matches!(ty.kind(), ty::Param(p) if p.index as usize >= parent_count),
+        GenericArgKind::Const(c) => matches!(c.kind(), ty::ConstKind::Param(p) if p.index as usize >= parent_count),
+        GenericArgKind::Lifetime(_) => false,
+    })
+}
+
 /// For at least some `QPath::TypeRelative`, the path segment's `res` can be `Res::Err`.
 /// `update_res` tries to fix the resolution when `parent_certainty` is `Certain(Some(..))`.
 fn update_res(
@@ -305,10 +328,8 @@ fn update_res(
     if path_segment.res == Res::Err
         && let Some(def_id) = parent_certainty.to_def_id()
     {
-        let mut def_path = cx.get_def_path(def_id);
-        def_path.push(path_segment.ident.name);
         let ns = if resolves_to_type { PathNS::Type } else { PathNS::Value };
-        if let &[id] = lookup_path(cx.tcx, ns, &def_path).as_slice() {
+        if let Some(id) = lookup_unique_child(cx.tcx, def_id, ns, path_segment.ident.name) {
             return Some(Res::Def(cx.tcx.def_kind(id), id));
         }
     }

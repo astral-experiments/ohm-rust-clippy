@@ -188,6 +188,17 @@ pub fn lookup_path(tcx: TyCtxt<'_>, ns: PathNS, path: &[Symbol]) -> Vec<DefId> {
     lookup_path_impl(tcx, ns, path, Search::Public, |item| item.id)
 }
 
+/// Look up a child of a resolved type without retracing its possibly private module path.
+/// Multiple inherent impls can provide the same name, in which case the result is ambiguous.
+pub(crate) fn lookup_unique_child(tcx: TyCtxt<'_>, base: DefId, ns: PathNS, name: Symbol) -> Option<DefId> {
+    let mut found = None;
+    let mut ambiguous = false;
+    lookup_with_base(tcx, base, ns, &[name], Search::Public, |item| {
+        ambiguous |= found.replace(item.id).is_some();
+    });
+    found.filter(|_| !ambiguous)
+}
+
 /// A definition named in a lint setting.
 ///
 /// An omitted declaration and its children can change without changing the public hash.
