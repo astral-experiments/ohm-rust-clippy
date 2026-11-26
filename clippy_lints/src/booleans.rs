@@ -506,6 +506,7 @@ fn simple_negate(b: Bool) -> Bool {
 struct Stats {
     terminals: [usize; 32],
     negations: usize,
+    nested_negation: bool,
     ops: usize,
 }
 
@@ -514,6 +515,7 @@ fn terminal_stats(b: &Bool) -> Stats {
         match b {
             True | False => stats.ops += 1,
             Not(inner) => {
+                stats.nested_negation |= matches!(**inner, Not(_));
                 match **inner {
                     And(_) | Or(_) => stats.ops += 1, // brackets are also operations
                     _ => stats.negations += 1,
@@ -546,6 +548,15 @@ impl<'tcx> NonminimalBoolVisitor<'_, 'tcx> {
             if stats.ops > 7 {
                 // QMC has exponentially slow behavior as the number of ops increases.
                 // See #825, #13206
+                return;
+            }
+            // Connecting n distinct terminals needs at least n - 1 operations.
+            // At equality there are no repeated terminals, constants, or negated
+            // groups. Each terminal can affect the result, so QMC cannot remove
+            // one. Without nested negations, fewer negations at the same
+            // operation count would change at least one terminal's polarity.
+            if stats.ops + 1 == h2q.terminals.len() && !stats.nested_negation {
+                check_simplify_not(self.cx, self.msrv, e);
                 return;
             }
             let mut simplified = expr.simplify();

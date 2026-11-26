@@ -110,3 +110,14 @@ fn main() {
     let _: HashMap<_, _> = std::iter::empty::<(String, ())>().collect();
     //~^ zero_sized_map_values
 }
+
+fn nested_aliases() {
+    use std::collections::BTreeMap as Tree;
+    type Map<T> = Tree<u32, T>;
+
+    #[expect(clippy::zero_sized_map_values)]
+    type Callback = fn(&Option<Map<()>>);
+
+    #[expect(clippy::zero_sized_map_values)]
+    type Nested = [Tree<u32, ()>; 2];
+}

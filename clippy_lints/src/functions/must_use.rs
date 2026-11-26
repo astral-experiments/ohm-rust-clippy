@@ -14,7 +14,7 @@ use clippy_utils::diagnostics::span_lint_and_then;
 use clippy_utils::source::snippet_indent;
 use clippy_utils::ty::{describe_must_use_type, opt_must_use_path};
 use clippy_utils::visitors::for_each_expr_without_closures;
-use clippy_utils::{is_entrypoint_fn, return_ty, trait_ref_of_method};
+use clippy_utils::{is_entrypoint_fn, is_lint_allowed, return_ty, trait_ref_of_method};
 use rustc_span::Symbol;
 
 use core::ops::ControlFlow;
@@ -214,7 +214,8 @@ fn check_must_use_candidate<'tcx>(
     item_id: hir::OwnerId,
     msg: &'static str,
 ) {
-    if has_mutable_arg(cx, body)
+    if is_lint_allowed(cx, MUST_USE_CANDIDATE, cx.last_node_with_lint_attrs)
+        || has_mutable_arg(cx, body)
         || mutates_static(cx, body)
         || item_span.in_external_macro(cx.sess().source_map())
         || returns_unit(decl)
