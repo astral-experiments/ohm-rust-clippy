@@ -252,3 +252,17 @@ fn dont_simplify_double_not_if_types_differ() {
     //~^ nonminimal_bool
     //~| bool_comparison
 }
+
+fn distinct_terminals(a: bool, b: bool, c: bool, d: bool) {
+    let _ = a && (b || !c) && d;
+    let _ = !a || !b || (c && !d);
+    #[expect(clippy::nonminimal_bool)]
+    let _ = (a && b) || (a && c);
+    #[expect(clippy::nonminimal_bool)]
+    let _ = !!a || b;
+}
+
+#[expect(clippy::nonminimal_bool)]
+fn negated_method_inside_minimal_expr(a: bool, x: Option<i32>) -> bool {
+    a && !x.is_some()
+}

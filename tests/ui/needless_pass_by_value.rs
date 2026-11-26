@@ -224,3 +224,10 @@ fn main() {
     // https://github.com/rust-lang/rust-clippy/issues/3144
     is_sync(HashSet::<usize>::new());
 }
+
+fn mixed_uses(flag: bool, moved: String, #[expect(clippy::needless_pass_by_value)] borrowed: Vec<u32>) {
+    if flag {
+        drop(moved);
+    }
+    println!("{borrowed:?}");
+}

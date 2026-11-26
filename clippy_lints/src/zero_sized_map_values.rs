@@ -1,7 +1,8 @@
 use clippy_utils::diagnostics::span_lint_and_help;
 use clippy_utils::res::MaybeDef as _;
 use clippy_utils::ty::ty_from_hir_ty;
-use rustc_hir::{self as hir, AmbigArg, HirId, ItemKind, Node};
+use rustc_hir::def::{DefKind, Res};
+use rustc_hir::{self as hir, AmbigArg, HirId, ItemKind, Node, QPath, TyKind};
 use rustc_lint::{LateContext, LateLintPass, declare_lint_pass};
 use rustc_middle::ty::layout::LayoutOf as _;
 use rustc_middle::ty::{self, TypeVisitableExt as _};
@@ -45,6 +46,7 @@ declare_lint_pass!(ZeroSizedMapValues => [ZERO_SIZED_MAP_VALUES]);
 impl LateLintPass<'_> for ZeroSizedMapValues {
     fn check_ty<'tcx>(&mut self, cx: &LateContext<'tcx>, hir_ty: &hir::Ty<'tcx, AmbigArg>) {
         if !hir_ty.span.from_expansion()
+            && could_be_map(cx, hir_ty)
             && !in_trait_impl(cx, hir_ty.hir_id)
             // We don't care about infer vars
             && let ty = ty_from_hir_ty(cx, hir_ty.as_unambig_ty())
@@ -71,6 +73,30 @@ impl LateLintPass<'_> for ZeroSizedMapValues {
                 "consider using a set instead",
             );
         }
+    }
+}
+
+// Lowering a signature type can recursively lower its arguments. The lint pass
+// visits nested types separately, so only the outer type matters here.
+fn could_be_map(cx: &LateContext<'_>, hir_ty: &hir::Ty<'_, AmbigArg>) -> bool {
+    match hir_ty.kind {
+        TyKind::Path(QPath::Resolved(_, path)) => match path.res {
+            Res::PrimTy(_) => false,
+            Res::Def(DefKind::Struct | DefKind::Enum | DefKind::Union, id) => {
+                matches!(id.opt_diag_name(cx), Some(sym::HashMap | sym::BTreeMap))
+            },
+            // In particular, aliases and Self can resolve to a map.
+            _ => true,
+        },
+        TyKind::Ref(..)
+        | TyKind::Ptr(..)
+        | TyKind::Tup(..)
+        | TyKind::Slice(..)
+        | TyKind::Array(..)
+        | TyKind::FnPtr(..)
+        | TyKind::TraitObject(..)
+        | TyKind::Never => false,
+        _ => true,
     }
 }
 
