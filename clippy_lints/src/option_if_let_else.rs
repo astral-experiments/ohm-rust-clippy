@@ -392,7 +392,10 @@ fn is_none_or_err_arm(cx: &LateContext<'_>, arm: &Arm<'_>) -> bool {
 impl<'tcx> LateLintPass<'tcx> for OptionIfLetElse {
     fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &Expr<'tcx>) {
         // Don't lint macros and constants
-        if expr.span.from_expansion() || is_in_const_context(cx) {
+        if !matches!(expr.kind, ExprKind::If(..) | ExprKind::Match(..))
+            || expr.span.from_expansion()
+            || is_in_const_context(cx)
+        {
             return;
         }
 

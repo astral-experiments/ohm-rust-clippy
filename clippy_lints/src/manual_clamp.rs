@@ -139,12 +139,11 @@ struct InputMinMax<'tcx> {
 
 impl<'tcx> LateLintPass<'tcx> for ManualClamp {
     fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx Expr<'tcx>) {
-        // Cheap kind check before the costlier const context query.
+        // Only look up the const context when a clamp pattern matches.
         if matches!(
             expr.kind,
             ExprKind::If(..) | ExprKind::Match(..) | ExprKind::MethodCall(..) | ExprKind::Call(..)
         ) && !expr.span.from_expansion()
-            && !is_in_const_context(cx)
         {
             let suggestion = is_if_elseif_else_pattern(cx, expr)
                 .or_else(|| is_max_min_pattern(cx, expr))
@@ -152,6 +151,7 @@ impl<'tcx> LateLintPass<'tcx> for ManualClamp {
                 .or_else(|| is_match_pattern(cx, expr))
                 .or_else(|| is_if_elseif_pattern(cx, expr));
             if let Some(suggestion) = suggestion
+                && !is_in_const_context(cx)
                 && self.msrv.meets(cx, msrvs::CLAMP)
             {
                 maybe_emit_suggestion(cx, &suggestion);

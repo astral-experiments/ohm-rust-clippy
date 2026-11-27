@@ -33,8 +33,21 @@ pub fn check<'tcx>(
     args: &'tcx [Expr<'_>],
     msrv: Msrv,
 ) {
-    if let Some(method_parent_id) = cx.typeck_results().type_dependent_def_id(expr.hir_id).opt_parent(cx)
-        && args.is_empty()
+    if let [arg] = args {
+        check_map_argument(cx, expr, receiver, arg);
+    } else if args.is_empty()
+        && matches!(
+            method_name,
+            sym::cloned
+                | sym::copied
+                | sym::into_owned
+                | sym::to_os_string
+                | sym::to_owned
+                | sym::to_path_buf
+                | sym::to_string
+                | sym::to_vec
+        )
+        && let Some(method_parent_id) = cx.typeck_results().type_dependent_def_id(expr.hir_id).opt_parent(cx)
     {
         if is_cloned_or_copied(cx, method_name, method_parent_id) {
             unnecessary_iter_cloned::check(cx, expr, method_name, receiver);
@@ -57,8 +70,6 @@ pub fn check<'tcx>(
             }
             check_other_call_arg(cx, expr, method_name, receiver);
         }
-    } else {
-        check_borrow_predicate(cx, expr);
     }
 }
 
@@ -685,7 +696,7 @@ fn is_slice_and_vec(cx: &LateContext<'_>, arg_ty: Ty<'_>, original_arg_ty: Ty<'_
 // 1. The argument is a non-mutable reference.
 // 2. It calls `to_owned()`, `to_string()` or `to_vec()`.
 // 3. That the method is called on `String` or on `Vec` (only types supported for the moment).
-fn check_if_applicable_to_argument<'tcx>(cx: &LateContext<'tcx>, arg: &Expr<'tcx>) {
+fn check_map_argument<'tcx>(cx: &LateContext<'tcx>, call: &Expr<'tcx>, receiver: &Expr<'tcx>, arg: &Expr<'tcx>) {
     if let ExprKind::AddrOf(BorrowKind::Ref, Mutability::Not, expr) = arg.kind
         && let ExprKind::MethodCall(method_path, caller, &[], _) = expr.kind
         && let Some(method_def_id) = cx.typeck_results().type_dependent_def_id(expr.hir_id)
@@ -699,6 +710,7 @@ fn check_if_applicable_to_argument<'tcx>(cx: &LateContext<'tcx>, arg: &Expr<'tcx
                 .is_some_and(|impl_did| cx.tcx.type_of(impl_did).instantiate_identity().skip_norm_wip().is_slice()),
             _ => false,
         }
+        && has_borrow_predicate(cx, call, receiver)
         && let original_arg_ty = cx.typeck_results().node_type(caller.hir_id).peel_refs()
         && let arg_ty = cx.typeck_results().expr_ty(arg)
         && let ty::Ref(_, arg_ty, Mutability::Not) = arg_ty.kind()
@@ -731,11 +743,15 @@ fn check_if_applicable_to_argument<'tcx>(cx: &LateContext<'tcx>, arg: &Expr<'tcx
 // 2. That it has `Borrow` in its generic predicates.
 // 3. `Self` is a std "map type" (ie `HashSet`, `HashMap`, `BTreeSet`, `BTreeMap`).
 // 4. The key to the "map type" is not a reference.
-fn check_borrow_predicate<'tcx>(cx: &LateContext<'tcx>, expr: &Expr<'tcx>) {
-    if let ExprKind::MethodCall(_, caller, &[arg], _) = expr.kind
-        && let Some(method_def_id) = cx.typeck_results().type_dependent_def_id(expr.hir_id)
-        && cx.tcx.trait_of_assoc(method_def_id).is_none()
-        && let Some(borrow_id) = cx.tcx.get_diagnostic_item(sym::Borrow)
+fn has_borrow_predicate(cx: &LateContext<'_>, expr: &Expr<'_>, caller: &Expr<'_>) -> bool {
+    let Some(method_def_id) = cx.typeck_results().type_dependent_def_id(expr.hir_id) else {
+        return false;
+    };
+    let Some(borrow_id) = cx.tcx.get_diagnostic_item(sym::Borrow) else {
+        return false;
+    };
+    cx.tcx.trait_of_assoc(method_def_id).is_none()
+        && std_map_key(cx, cx.typeck_results().expr_ty(caller)).is_some_and(|key_ty| !key_ty.is_ref())
         && cx.tcx.clauses_of(method_def_id).clauses.iter().any(|(clause, _)| {
             if let ClauseKind::Trait(trait_pred) = clause.kind().skip_binder()
                 && trait_pred.polarity == ty::ClausePolarity::Positive
@@ -746,12 +762,4 @@ fn check_borrow_predicate<'tcx>(cx: &LateContext<'tcx>, expr: &Expr<'tcx>) {
                 false
             }
         })
-        && let caller_ty = cx.typeck_results().expr_ty(caller)
-        // For now we limit it to "map types".
-        && let Some(key_ty) = std_map_key(cx, caller_ty)
-        // We need to check that the key type is not a reference.
-        && !key_ty.is_ref()
-    {
-        check_if_applicable_to_argument(cx, &arg);
-    }
 }

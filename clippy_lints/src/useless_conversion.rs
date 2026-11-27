@@ -46,7 +46,9 @@ impl_lint_pass!(UselessConversion => [USELESS_CONVERSION]);
 #[derive(Default)]
 pub struct UselessConversion {
     try_desugar_arm: Vec<HirId>,
-    expn_depth: u32,
+    // Only the outermost non-desugaring expansion matters. Its post-visit
+    // ends the suppression without inspecting the expansion of every descendant.
+    outer_expansion: Option<HirId>,
 }
 
 enum MethodOrFunction {
@@ -157,8 +159,8 @@ fn into_iter_deep_call<'hir>(cx: &LateContext<'_>, mut expr: &'hir Expr<'hir>) -
 impl<'tcx> LateLintPass<'tcx> for UselessConversion {
     fn check_expr(&mut self, cx: &LateContext<'tcx>, e: &'tcx Expr<'_>) {
         if e.span.from_expansion() {
-            if e.span.desugaring_kind().is_none() {
-                self.expn_depth += 1;
+            if self.outer_expansion.is_none() && e.span.desugaring_kind().is_none() {
+                self.outer_expansion = Some(e.hir_id);
             }
             return;
         }
@@ -263,6 +265,7 @@ impl<'tcx> LateLintPass<'tcx> for UselessConversion {
                         };
 
                         if let Some((parent_fn_did, args, node_args, kind)) = parent_fn
+                            && self.outer_expansion.is_none()
                             && let Some(into_iter_did) = cx.tcx.get_diagnostic_item(sym::IntoIterator)
                             && let sig = cx.tcx.fn_sig(parent_fn_did).skip_binder().skip_binder()
                             && let Some(arg_pos) = args.iter().position(|x| x.hir_id == e.hir_id)
@@ -276,7 +279,6 @@ impl<'tcx> LateLintPass<'tcx> for UselessConversion {
                                 param.index,
                                 node_args,
                             )
-                            && self.expn_depth == 0
                         {
                             // Get the "innermost" `.into_iter()` call, e.g. given this expression:
                             // `foo.into_iter().into_iter()`
@@ -463,8 +465,8 @@ impl<'tcx> LateLintPass<'tcx> for UselessConversion {
         if Some(&e.hir_id) == self.try_desugar_arm.last() {
             self.try_desugar_arm.pop();
         }
-        if e.span.from_expansion() && e.span.desugaring_kind().is_none() {
-            self.expn_depth -= 1;
+        if self.outer_expansion == Some(e.hir_id) {
+            self.outer_expansion = None;
         }
     }
 }

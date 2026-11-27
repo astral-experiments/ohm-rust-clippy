@@ -30,15 +30,12 @@ pub(super) fn check<'tcx>(
     iter_expr: &'tcx Expr<'tcx>,
     call_span: Span,
 ) {
-    let iter_ty = cx.typeck_results().expr_ty(iter_expr);
-    if has_non_owning_mutable_access(cx, iter_ty) {
-        return; // don't lint if the iterator has side effects
-    }
-
     if collect_turbofish_is_fully_concrete(collect_expr) {
         return; // don't lint if turbofish on collect maybe the only thing anchoring the type
     }
 
+    // Checking for side effects recursively inspects the iterator's type. Only do so
+    // once we have a candidate for a suggestion or a binding worth tracking.
     match cx.tcx.parent_hir_node(collect_expr.hir_id) {
         Node::Expr(parent) => {
             check_collect_into_intoiterator(cx, parent, collect_expr, call_span, iter_expr);
@@ -96,6 +93,9 @@ pub(super) fn check<'tcx>(
                 return;
             }
 
+            if has_non_owning_mutable_access(cx, cx.typeck_results().expr_ty(iter_expr)) {
+                return;
+            }
             span_lint_and_sugg(
                 cx,
                 NEEDLESS_COLLECT,
@@ -111,6 +111,7 @@ pub(super) fn check<'tcx>(
                 && let ty = cx.typeck_results().expr_ty(collect_expr)
                 && let Some(extra_spec) = ty.opt_diag_name(cx).and_then(ExtraFunctionSpec::new)
                 && let iter_ty = cx.typeck_results().expr_ty(iter_expr)
+                && !has_non_owning_mutable_access(cx, iter_ty)
                 && let Some(block) = get_enclosing_block(cx, l.hir_id)
                 && let Some((iter_calls, extra_calls)) =
                     detect_iter_and_into_iters(block, id, cx, get_captured_ids(cx, iter_ty), extra_spec)
@@ -218,6 +219,7 @@ fn check_collect_into_intoiterator<'tcx>(
                     }
                 })
                 .any(|ty| ty == inputs[arg_idx])
+                && !has_non_owning_mutable_access(cx, cx.typeck_results().expr_ty(iter_expr))
             {
                 span_lint_and_sugg(
                     cx,

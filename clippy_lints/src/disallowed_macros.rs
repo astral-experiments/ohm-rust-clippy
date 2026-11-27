@@ -129,8 +129,8 @@ impl DisallowedMacros {
 impl LateLintPass<'_> for DisallowedMacros {
     fn check_crate(&mut self, cx: &LateContext<'_>) {
         // once we check a crate in the late pass we can emit the early pass lints
-        if let Some(attr_spans) = self.early_macro_cache.clone().0.get() {
-            for span in attr_spans {
+        if let Some(attrs) = self.early_macro_cache.clone().0.get() {
+            for span in &attrs.spans {
                 self.check(cx, *span, None);
             }
         }

@@ -486,13 +486,15 @@ pub fn register_lint_passes(store: &mut rustc_lint::LintStore, conf: &'static Co
         let is_active = |lints: &rustc_lint::LintVec| {
             is_lint_pass_required(skippable_lints, lints) && !(incremental && incremental_lints::contains_pass(lints))
         };
-        Box::new(CombinedLateLintPass::new(
-            tcx,
-            conf,
-            format_args_storage.clone(),
-            attr_storage.clone(),
-            &is_active,
-        ))
+        let mut pass =
+            CombinedLateLintPass::new(tcx, conf, format_args_storage.clone(), attr_storage.clone(), &is_active);
+        // The early collector sees the expanded AST, including attributes from macros.
+        // Keep the usual passes if early collection wasn't available.
+        if attr_storage.0.get().is_some_and(|attrs| !attrs.has_debug_attrs) {
+            pass.DumpHir = None;
+            pass.Author = None;
+        }
+        Box::new(pass)
     }));
 }
 
