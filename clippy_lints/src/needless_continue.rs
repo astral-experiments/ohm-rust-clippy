@@ -131,11 +131,7 @@ declare_lint_pass!(NeedlessContinue => [NEEDLESS_CONTINUE]);
 
 impl<'tcx> LateLintPass<'tcx> for NeedlessContinue {
     fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx Expr<'tcx>) {
-        // We cannot use `from_expansion` because for loops, while loops and while let loops are desugared
-        // into `loop` expressions.
-        if !matches!(expr.span.ctxt().outer_expn_data().kind, ExpnKind::Macro(..)) {
-            check_and_warn(cx, expr);
-        }
+        check_and_warn(cx, expr);
     }
 }
 
@@ -464,6 +460,10 @@ where
 
 fn check_and_warn(cx: &LateContext<'_>, expr: &Expr<'_>) {
     with_loop_block(expr, |loop_block, label| {
+        // Skip macro expansions but preserve desugared loops.
+        if matches!(expr.span.ctxt().outer_expn_data().kind, ExpnKind::Macro(..)) {
+            return;
+        }
         let p = |continue_hir_id, continue_label: Option<&Label>, span: Span| {
             if compare_labels(label, continue_label) {
                 span_lint_hir_and_then(

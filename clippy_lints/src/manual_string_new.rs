@@ -38,7 +38,7 @@ declare_lint_pass!(ManualStringNew => [MANUAL_STRING_NEW]);
 
 impl LateLintPass<'_> for ManualStringNew {
     fn check_expr(&mut self, cx: &LateContext<'_>, expr: &Expr<'_>) {
-        if expr.span.from_expansion() {
+        if !matches!(expr.kind, ExprKind::Call(_, [_]) | ExprKind::MethodCall(..)) || expr.span.from_expansion() {
             return;
         }
 

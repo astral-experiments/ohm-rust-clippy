@@ -165,14 +165,7 @@ impl IncompatibleMsrv {
     }
 
     /// Emit lint if `def_id`, associated with `node` and `span`, is below the current MSRV.
-    fn emit_lint_if_under_msrv(
-        &mut self,
-        cx: &LateContext<'_>,
-        needs_const: bool,
-        def_id: DefId,
-        node: HirId,
-        span: Span,
-    ) {
+    fn emit_lint_if_under_msrv(&mut self, cx: &LateContext<'_>, is_call: bool, def_id: DefId, node: HirId, span: Span) {
         if !self.std_crates.contains(def_id.krate) {
             // No stability attributes to lookup for these items.
             return;
@@ -193,9 +186,12 @@ impl IncompatibleMsrv {
             }
         }
 
+        let Some(current) = self.msrv.current(cx) else {
+            return;
+        };
+        let needs_const = is_call && is_in_const_context(cx);
         // Check `is_in_test` last as it walks the HIR parent chain.
-        if let Some(current) = self.msrv.current(cx)
-            && let Availability::Since(version) = self.get_def_id_availability(cx.tcx, def_id, needs_const)
+        if let Availability::Since(version) = self.get_def_id_availability(cx.tcx, def_id, needs_const)
             && version > current
             && (self.check_in_tests || !is_in_test(cx.tcx, node))
         {
@@ -222,15 +218,16 @@ impl<'tcx> LateLintPass<'tcx> for IncompatibleMsrv {
         match expr.kind {
             ExprKind::MethodCall(_, _, _, span) => {
                 if let Some(method_did) = cx.typeck_results().type_dependent_def_id(expr.hir_id) {
-                    self.emit_lint_if_under_msrv(cx, is_in_const_context(cx), method_did, expr.hir_id, span);
+                    self.emit_lint_if_under_msrv(cx, true, method_did, expr.hir_id, span);
                 }
             },
             ExprKind::Call(callee, _) if let ExprKind::Path(qpath) = callee.kind => {
                 self.called_path = Some(callee.hir_id);
-                let needs_const = is_in_const_context(cx);
                 let def_id = if let Some(def_id) = cx.qpath_res(&qpath, callee.hir_id).opt_def_id() {
                     def_id
-                } else if needs_const && let ty::FnDef(def_id, _) = *cx.typeck_results().expr_ty(callee).kind() {
+                } else if is_in_const_context(cx)
+                    && let ty::FnDef(def_id, _) = *cx.typeck_results().expr_ty(callee).kind()
+                {
                     // Edge case where a function is first assigned then called.
                     // We previously would have warned for the non-const MSRV, when
                     // checking the path, but now that it's called the const MSRV
@@ -239,7 +236,7 @@ impl<'tcx> LateLintPass<'tcx> for IncompatibleMsrv {
                 } else {
                     return;
                 };
-                self.emit_lint_if_under_msrv(cx, needs_const, def_id, expr.hir_id, callee.span);
+                self.emit_lint_if_under_msrv(cx, true, def_id, expr.hir_id, callee.span);
             },
             // Desugaring into function calls by the compiler will use `QPath::LangItem` variants. Those should
             // not be linted as they will not be generated in older compilers if the function is not available,
